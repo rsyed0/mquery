@@ -18,7 +18,7 @@ from strategies import *
 import sys
 
 total_cash = 10000
-max_spend = 0.736 #0.25
+max_spend = 0.4377 #0.25
 
 smaPeriod = 15
 
@@ -169,7 +169,7 @@ class MyStrategy(strategy.BacktestingStrategy):
         self.__cprices.append(c_price)
         self.__shareValues.append(n_shares*c_price)
 
-best_model = [0.05681086224553791, 0.024128064830207734, 0.8180609588645122, 0.03092660246940697, 0.040104637077510615, 0.025963724711221436, 0.004005149801603036]
+best_model = [0.5240942184198141, 0.011991984061265401, 0.03332160740001963, 0.11681458821783589, 0.11902285924129916, 0.19005406060851363, 0.004700682051251965]
 #best_model = [0,0,0,0,0,0,1]
 stock = sys.argv[1].lower()
 period = sys.argv[2].lower() if len(sys.argv) >= 3 else "1y"

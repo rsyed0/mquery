@@ -337,5 +337,9 @@ def gfill_onBars(m_strategy, bars):
 
     return 0
 
+# TODO output -1 to 1 based on price n_ints later
+def nInts_idVal(self, prices, window_size=10, n_ints=25):
+    pass
+
 # strategy *: composite of working indicators (feedback loop)
 # TODO figure out how to use this with theta strategies

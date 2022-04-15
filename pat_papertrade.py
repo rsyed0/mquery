@@ -19,8 +19,8 @@ from strategies import *
 
 import sys
 
-pop_size = 30
-n_generations = 10
+#pop_size = 30
+#n_generations = 10
 n_survivors = 10
 p_mutation = 0.5
 msp_dominance = 0.5  # 0.5 to 1
@@ -41,7 +41,7 @@ if allow_negation:
 total_cash = 10000
 
 class WeightedIndicatorStrategy(strategy.BacktestingStrategy):
-    def __init__(self, feed, instrument, smaPeriod, weights, max_spend=0.25, live=False, fastEmaPeriod=12, slowEmaPeriod=26, signalEmaPeriod=9, bBandsPeriod=1, verbose=False):
+    def __init__(self, feed, instrument, weights, smaPeriod=15, max_spend=0.25, live=False, fastEmaPeriod=12, slowEmaPeriod=26, signalEmaPeriod=9, bBandsPeriod=1, verbose=False):
         super(WeightedIndicatorStrategy, self).__init__(feed, 10000)
         self.__position = None
         self.__instrument = instrument
@@ -49,6 +49,8 @@ class WeightedIndicatorStrategy(strategy.BacktestingStrategy):
         self.__weights = weights
         self.__onBars = [sma_onBars, rsi_onBars, smarsi_onBars, macd_onBars, cbasis_onBars, gfill_onBars, history_onBars]
         self.__cbasis = 0
+
+        self.__modelWtValues = None
 
         assert isclose(sum(self.__weights), 1)
         if allow_negation:
@@ -126,6 +128,9 @@ class WeightedIndicatorStrategy(strategy.BacktestingStrategy):
     def get_trend_length(self):
         return self.__trendLength
 
+    def get_model_wt_values(self):
+        return self.__modelWtValues
+
     def set_last_top(self, lt):
         self.__lastTop = lt
 
@@ -164,14 +169,19 @@ class WeightedIndicatorStrategy(strategy.BacktestingStrategy):
 
         if not allow_negation:
             # w/o inversing indicators
-            delta_shares = int(total_cash*self.__maxSpend*sum([wt*st_onBars(self, bars) for wt, st_onBars in zip(self.__weights, self.__onBars)])/c_price)
+            model_wt_values = [wt*st_onBars(self, bars) for wt,st_onBars in zip(self.__weights, self.__onBars)]
+            delta_shares = int(total_cash*self.__maxSpend*sum(model_wt_values)/c_price)
+            self.__modelWtValues = model_wt_values
         else:
             # w/ inversing indicators
+            model_wt_values = []
             wt_sum = 0
             for i in range(len(self.__onBars)):
                 res = self.__onBars[i](self, bars)
                 wt_sum += (self.__weights[2*i]*res - self.__weights[2*i+1]*res)
+                model_wt_values.extend([self.__weights[2*i]*res, -self.__weights[2*i+1]*res])
             delta_shares = int(total_cash*self.__maxSpend*wt_sum/c_price)
+            self.__modelWtValues = model_wt_values
 
         if delta_shares > 0 and strat_cash < delta_shares*c_price:
             delta_shares = int(strat_cash/c_price)
@@ -233,12 +243,13 @@ def normalize(model):
     s = sum(model)
     return [x/s for x in model]
 
-def run_strategy(smaPeriod):
+def run_strategy(stock=None, period=None, interval=None, pop_size=30, n_generations=10, verbose=True):
     # Load the bar feed from the CSV file
     #feed = quandlfeed.Feed()
-    stock = sys.argv[1].lower()
-    period = sys.argv[2].lower() if len(sys.argv) >= 3 else "1y"
-    interval = sys.argv[3].lower() if len(sys.argv) >= 4 else ""
+    if stock is None or period is None or interval is None:
+        stock = sys.argv[1].lower()
+        period = sys.argv[2].lower() if len(sys.argv) >= 3 else "1y"
+        interval = sys.argv[3].lower() if len(sys.argv) >= 4 else ""
 
     #feed.addBarsFromCSV(stock, "WIKI-"+stock.upper()+"-1y-yfinance.csv")
 
@@ -279,7 +290,7 @@ def run_strategy(smaPeriod):
                 feed.addBarsFromCSV(stock, "WIKI-%s-%s-%s-yfinance.csv" % (stock.upper(), period.lower(), interval.lower()))
 
             # run strategy, save score
-            strat = WeightedIndicatorStrategy(feed, stock, smaPeriod, population[p_i][0], max_spend=population[p_i][1]) #verbose=p_i==0)
+            strat = WeightedIndicatorStrategy(feed, stock, population[p_i][0], max_spend=population[p_i][1]) #verbose=p_i==0)
             strat.run()
             score = strat.getBroker().getEquity()
             #print(population[p_i],score)
@@ -287,7 +298,9 @@ def run_strategy(smaPeriod):
 
         scores = [(i,scores[i]) for i in range(pop_size)]
         scores.sort(key=lambda x: x[1], reverse=True)
-        print("Generation",i+1,":",scores)
+
+        if verbose:
+            print("Generation",i+1,":",scores)
 
         scores = scores[:n_survivors]
         if scores[0][1] > high_score:
@@ -309,26 +322,33 @@ def run_strategy(smaPeriod):
     else:
         feed.addBarsFromCSV(stock, "WIKI-%s-%s-%s-yfinance.csv" % (stock.upper(), period.lower(), interval.lower()))
 
-    myStrategy = WeightedIndicatorStrategy(feed, stock, smaPeriod, best_model[0], max_spend=best_model[1], verbose=True)
+    myStrategy = WeightedIndicatorStrategy(feed, stock, best_model[0], max_spend=best_model[1], verbose=verbose)
     myStrategy.run()
-    print("Final portfolio value: $%.2f" % myStrategy.getBroker().getEquity())
+
+    final_port_value = myStrategy.getBroker().getEquity()
+    if verbose:
+        print("Final portfolio value: $%.2f" % final_port_value)
 
     model_scores = sorted([(model_descs[i],best_model[0][i]) for i in range(n_models)], key=lambda x:x[1], reverse=True)
     best_model_desc = str([(x,str(y)[:4]) for x,y in model_scores[:4]])
 
-    print(best_model)
-    print(best_model_desc)
+    if verbose:
+        print(best_model)
+        print(best_model_desc)
 
     if allow_negation:
         print("Positive:",sum([best_model[0][i] for i in range(0,len(best_model[0]),2)]),", Negative:",sum([best_model[0][i] for i in range(1,len(best_model[0]),2)]))
 
-    plt.title(stock.upper()+" "+best_model_desc) #str([str(x)[:4] for x in best_model]))
-    plt.plot([i for i in range(len(myStrategy.get_port_values()))], myStrategy.get_port_values(), label="Port Value")
-    #plt.show()
-    plt.plot([i for i in range(len(myStrategy.get_port_values()))], [p*int(total_cash/myStrategy.get_cprices()[0]) for p in myStrategy.get_cprices()], label="Adj Share Price")
-    plt.plot([i for i in range(len(myStrategy.get_port_values()))], myStrategy.get_share_values(), label="Port Value in Shares")
-    plt.legend()
-    plt.show()
+    if verbose:
+        plt.title(stock.upper()+" "+best_model_desc) #str([str(x)[:4] for x in best_model]))
+        plt.plot([i for i in range(len(myStrategy.get_port_values()))], myStrategy.get_port_values(), label="Port Value")
+        #plt.show()
+        plt.plot([i for i in range(len(myStrategy.get_port_values()))], [p*int(total_cash/myStrategy.get_cprices()[0]) for p in myStrategy.get_cprices()], label="Adj Share Price")
+        plt.plot([i for i in range(len(myStrategy.get_port_values()))], myStrategy.get_share_values(), label="Port Value in Shares")
+        plt.legend()
+        plt.show()
+
+    return myStrategy, best_model[1]
 
 if __name__ == "__main__":
-    run_strategy(15)
+    run_strategy()
