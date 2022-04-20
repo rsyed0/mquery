@@ -63,10 +63,10 @@ def main():
         ovr_performance = wi_strategy.get_cprices()[-1] * (total_cash / wi_strategy.get_cprices()[0])
         mkt_diff = (total_value - ovr_performance) / total_cash
 
-        scores.append((symbol, exposure, rating, mkt_diff))
+        scores.append((symbol, exposure, rating, mkt_diff, max_spend, wi_strategy))
 
     scores.sort(key=lambda x:x[2], reverse=True)
-    print(scores)
+    #print(scores)
 
     labels = [x[0] for x in scores]
     exposures = [x[1] for x in scores]
@@ -85,17 +85,48 @@ def main():
     plt.clf()
 
     performance = [x[3] for x in scores]
-    bullishness = [e+s for e,s in zip(exposures, ratings)]
+    bullishness = [e+x[4]*s for e,s,x in zip(exposures, ratings, scores)]
     plt.scatter(performance, bullishness)
     plt.xlabel("Performance of Classifier (pct over default)")
-    plt.ylabel("Bullishness of Classifier (h + dh/dt)")
+    plt.ylabel("Bullishness of Classifier (h + spend*dh/dt)")
 
-    dot_diameter = 0.005
     for i,label in enumerate(labels):
         plt.annotate(label.upper(), (performance[i]+dot_diameter, bullishness[i]+dot_diameter))
 
     plt.show()
 
+    # allow user to examine models for certain stocks
+    u_input = ""
+    sym_to_model = {sym:model for sym,_,_,_,_,model in scores}
+    while not u_input == "!q":
+        u_input = input("Enter symbol to examine: ")
+        stock = u_input.lower()
+
+        if stock in sym_to_model:
+            model = sym_to_model[u_input]
+            model_weights = model.get_weights()
+            model_max_spend = model.get_max_spend()
+
+            feed = quandlfeed.Feed() if interval.lower() == "1d" else GenericBarFeed(Frequency.MINUTE)
+            if interval == "1d":
+                feed.addBarsFromCSV(stock, "WIKI-%s-%s-yfinance.csv" % (stock.upper(), period.lower()))
+            else:
+                feed.addBarsFromCSV(stock, "WIKI-%s-%s-%s-yfinance.csv" % (stock.upper(), period.lower(), interval.lower()))
+
+            print(model_weights)
+
+            myStrategy = WeightedIndicatorStrategy(feed, stock, model_weights, max_spend=model_max_spend)
+            myStrategy.run()
+
+            plt.title(stock.upper()) #str([str(x)[:4] for x in best_model]))
+            plt.plot([i for i in range(len(myStrategy.get_port_values()))], myStrategy.get_port_values(), label="Port Value")
+            plt.plot([i for i in range(len(myStrategy.get_port_values()))], [p*int(total_cash/myStrategy.get_cprices()[0]) for p in myStrategy.get_cprices()], label="Adj Share Price")
+            plt.plot([i for i in range(len(myStrategy.get_port_values()))], myStrategy.get_share_values(), label="Port Value in Shares")
+            plt.legend()
+            plt.show()
+
+        elif not stock == "!q":
+            print("Invalid symbol")
 
 if __name__ == "__main__":
     main()

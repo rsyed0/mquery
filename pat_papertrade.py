@@ -21,11 +21,11 @@ import sys
 
 #pop_size = 30
 #n_generations = 10
-n_survivors = 10
+n_survivors = 15
 p_mutation = 0.5
 msp_dominance = 0.5  # 0.5 to 1
 
-allow_negation = False
+allow_negation = True
 n_models = 7*(2 if allow_negation else 1)
 
 keep_best_model = False
@@ -82,6 +82,12 @@ class WeightedIndicatorStrategy(strategy.BacktestingStrategy):
             self.__bid = bid
             self.__ask = ask
             self.info("Order book updated. Best bid: %s. Best ask: %s" % (self.__bid, self.__ask))
+
+    def get_weights(self):
+        return self.__weights
+
+    def get_max_spend(self):
+        return self.__maxSpend
 
     def set_position(self, position):
         self.__position = position
@@ -243,7 +249,7 @@ def normalize(model):
     s = sum(model)
     return [x/s for x in model]
 
-def run_strategy(stock=None, period=None, interval=None, pop_size=30, n_generations=10, verbose=True):
+def run_strategy(stock=None, period=None, interval=None, pop_size=50, n_generations=10, verbose=True):
     # Load the bar feed from the CSV file
     #feed = quandlfeed.Feed()
     if stock is None or period is None or interval is None:
