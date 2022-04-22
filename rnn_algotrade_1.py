@@ -10,7 +10,7 @@ Original file is located at
 from pandas import read_csv
 import numpy as np
 from keras.models import Sequential
-from keras.layers import Dense, SimpleRNN, InputLayer
+from keras.layers import Dense, SimpleRNN, InputLayer, LSTM
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error
 import math
@@ -296,7 +296,8 @@ def main(stock=None, period=None, interval=""):
         # TODO turn this into RNN with n_models inputs per time step, using window_size
         # TODO use separate model to predict max_spend (volatility)
 
-        model.add(SimpleRNN(hidden_units, input_shape=(window_size, n_models,), activation='linear'))
+        model.add(LSTM(128, input_shape=(window_size, n_models,), activation='linear'))
+        #model.add(SimpleRNN(hidden_units, input_shape=(window_size, n_models,), activation='linear'))
         #model.add(InputLayer(input_shape=(window_size, n_models,)))
         model.add(Dense(units=dense_units, activation='linear'))
         model.add(Dense(units=1, activation='linear'))
@@ -308,7 +309,7 @@ def main(stock=None, period=None, interval=""):
 
         #print(X_train, norm_y_train)
 
-        model.fit(X_train, y_train, epochs=n_epochs)
+        model.fit(X_train, norm_y_train, epochs=n_epochs)
 
     else:
         # TODO train RNN outside strategy framework, then build strategy for testing side

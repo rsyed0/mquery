@@ -284,43 +284,47 @@ def run_strategy(stock=None, period=None, interval=None, pop_size=50, n_generati
     high_score = 0
     best_model = None
 
-    for i in range(n_generations):
+    try:
+        for i in range(n_generations):
 
-        scores = [0 for i in range(pop_size)]
-        for p_i in range(pop_size):
+            scores = [0 for i in range(pop_size)]
+            for p_i in range(pop_size):
 
-            feed = quandlfeed.Feed() if interval.lower() == "" else GenericBarFeed(Frequency.MINUTE)
-            if len(interval) == 0:
-                feed.addBarsFromCSV(stock, "WIKI-%s-%s-yfinance.csv" % (stock.upper(), period.lower()))
-            else:
-                feed.addBarsFromCSV(stock, "WIKI-%s-%s-%s-yfinance.csv" % (stock.upper(), period.lower(), interval.lower()))
+                feed = quandlfeed.Feed() if interval.lower() == "" else GenericBarFeed(Frequency.MINUTE)
+                if len(interval) == 0:
+                    feed.addBarsFromCSV(stock, "WIKI-%s-%s-yfinance.csv" % (stock.upper(), period.lower()))
+                else:
+                    feed.addBarsFromCSV(stock, "WIKI-%s-%s-%s-yfinance.csv" % (stock.upper(), period.lower(), interval.lower()))
 
-            # run strategy, save score
-            strat = WeightedIndicatorStrategy(feed, stock, population[p_i][0], max_spend=population[p_i][1]) #verbose=p_i==0)
-            strat.run()
-            score = strat.getBroker().getEquity()
-            #print(population[p_i],score)
-            scores[p_i] = score
+                # run strategy, save score
+                strat = WeightedIndicatorStrategy(feed, stock, population[p_i][0], max_spend=population[p_i][1]) #verbose=p_i==0)
+                strat.run()
+                score = strat.getBroker().getEquity()
+                #print(population[p_i],score)
+                scores[p_i] = score
 
-        scores = [(i,scores[i]) for i in range(pop_size)]
-        scores.sort(key=lambda x: x[1], reverse=True)
+            scores = [(i,scores[i]) for i in range(pop_size)]
+            scores.sort(key=lambda x: x[1], reverse=True)
 
-        if verbose:
-            print("Generation",i+1,":",scores)
+            if verbose:
+                print("Generation",i+1,":",scores)
 
-        scores = scores[:n_survivors]
-        if scores[0][1] > high_score:
-            best_model = population[scores[0][0]]
-            high_score = scores[0][1]
+            scores = scores[:n_survivors]
+            if scores[0][1] > high_score:
+                best_model = population[scores[0][0]]
+                high_score = scores[0][1]
 
-        next_pop = [best_model] if keep_best_model else []
-        for i in range(len(scores)):
-            for j in range(i+1, len(scores)):
-                res = cross(population[scores[i][0]], population[scores[j][0]], n_children=1)
-                next_pop.extend([(normalize(x[0]),x[1]) for x in res])
-            if len(next_pop) >= pop_size:
-                population = next_pop[:pop_size]
-                break
+            next_pop = [best_model] if keep_best_model else []
+            for i in range(len(scores)):
+                for j in range(i+1, len(scores)):
+                    res = cross(population[scores[i][0]], population[scores[j][0]], n_children=1)
+                    next_pop.extend([(normalize(x[0]),x[1]) for x in res])
+                if len(next_pop) >= pop_size:
+                    population = next_pop[:pop_size]
+                    break
+    except KeyboardInterrupt:
+        if best_model is None:
+            sys.exit(1)
 
     feed = quandlfeed.Feed() if interval.lower() == "" else GenericBarFeed(Frequency.MINUTE)
     if len(interval) == 0:
