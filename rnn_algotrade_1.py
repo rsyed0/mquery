@@ -25,25 +25,33 @@ from pyalgotrade.barfeed.csvfeed import GenericBarFeed
 
 from strategies import *
 
+from random import randint, random
+
 import sys
 import pandas as pd
 
-max_spend = 0.25
-window_size = 15
-fwd_window_size = 15
-total_cash = 10000
+n_survivors = 3
+p_mutation = 0.5
+msp_dominance = 0.5  # 0.5 to 1
 
+pct_adj = 0.1
+
+window_size = 25
+fwd_window_size = 10
+
+total_cash = 10000
 n_models = 7
 
-n_epochs = 25
+n_epochs = 5 # 25 - overfit?
 
 hidden_units = 2
 dense_units = 5
 
 use_ind_values = True
+debug = False
 
 class RNNStrategy(strategy.BacktestingStrategy):
-    def __init__(self, feed, instrument, model, smaPeriod=15, max_spend=0.25, fastEmaPeriod=12, slowEmaPeriod=26, signalEmaPeriod=9, bBandsPeriod=1, isTest=False, verbose=False):
+    def __init__(self, feed, instrument, model, smaPeriod=15, max_spend=0.25, fastEmaPeriod=12, slowEmaPeriod=26, signalEmaPeriod=9, bBandsPeriod=1, is_test=False, verbose=False):
         super(RNNStrategy, self).__init__(feed, 10000)
         self.__instrument = instrument
         self.__model = model
@@ -63,7 +71,7 @@ class RNNStrategy(strategy.BacktestingStrategy):
         self.__bb = bollinger.BollingerBands(feed[instrument].getPriceDataSeries(), bBandsPeriod, 2)
 
         self.__verbose = verbose
-        self.__isTest = isTest
+        self.__isTest = is_test
 
         self.__indValues = []
         self.__window = np.array([])
@@ -131,7 +139,7 @@ class RNNStrategy(strategy.BacktestingStrategy):
         c_price = bar.getPrice()
         strat_cash = self.getBroker().getCash(False)
 
-        pd_ind_values = np.array([onBars(self, bars) for onBars in self.__onBars])
+        pd_ind_values = np.array([st_onBars(self, bars) for st_onBars in self.__onBars])
         self.__indValues.append(pd_ind_values)
 
         if self.__isTest:
@@ -143,17 +151,23 @@ class RNNStrategy(strategy.BacktestingStrategy):
                 x = np.array(self.__indValues[-window_size:])
                 x = np.reshape(x, (1, window_size, n_models, 1))
                 res = self.__model.predict(x)
-                delta_shares = int(total_cash*max_spend*res)
+
+                if self.__verbose and debug:
+                    print(x,res)
+
+                delta_shares = int(self.__maxSpend*total_cash*res)
             else:
                 delta_shares = 0
         else:
             self.__window = np.append(self.__window, c_price)
             if len(self.__window) > window_size:
-                x = np.reshape(np.array([(self.__window[i+1] - self.__window[i]) / self.__window[i] for i in range(len(self.__window)-1)]),(1, window_size, 1))
-                #print(x)
+                x = np.reshape(np.array([(self.__window[i+1] - self.__window[i]) / (self.__window[i] * pct_adj) for i in range(len(self.__window)-1)]), (1, window_size, 1))
                 res = self.__model.predict(x)
-                print(res)
-                delta_shares = int(total_cash*max_spend*res)
+
+                if self.__verbose and debug:
+                    print(x,res)
+
+                delta_shares = int(self.__maxSpend*total_cash*res)
                 self.__window = np.delete(self.__window, 0)
             else:
                 delta_shares = 0
@@ -164,13 +178,14 @@ class RNNStrategy(strategy.BacktestingStrategy):
         if delta_shares > 0 and strat_cash < delta_shares*c_price:
             delta_shares = int(strat_cash/c_price)
         
-        print("Day ",len(self.__portValues),": have",n_shares,"shares and $",strat_cash, end="")
-        if delta_shares > 0:
-            print(", buying",delta_shares,"shares at $",c_price)
-        elif delta_shares < 0:
-            print(", selling",abs(delta_shares),"shares at $",c_price)
-        else:
-            print("")
+        if self.__verbose:
+            print("Day %d: have %d shares and $%7.2f" % (len(self.__portValues), n_shares, strat_cash), end="")
+            if delta_shares > 0:
+                print(", buying %d shares at $%7.2f" % (delta_shares, c_price))
+            elif delta_shares < 0:
+                print(", selling %d shares at $%7.2f" % (abs(delta_shares), c_price))
+            else:
+                print("")
         
         if not delta_shares == 0:
             self.marketOrder(self.__instrument, delta_shares)
@@ -190,7 +205,6 @@ def csv_to_xy(path):
     csv_df = pd.read_csv(path)
     cprices = list(csv_df["Close"])
     
-    pct_adj = 0.1
     pct_chgs = [(cprices[i+1]-cprices[i]) / (cprices[i] * pct_adj) for i in range(len(cprices)-1)]
 
     # use percent changes in a given window as input x
@@ -199,7 +213,7 @@ def csv_to_xy(path):
     # use percent change in next interval as output y
     y_train = np.array(pct_chgs)
 
-    # TODO implement longer term bullishness in output
+    # implement longer term bullishness in output
     yt = []
     for i in range(len(pct_chgs)):
         importances, values = [], []
@@ -212,60 +226,125 @@ def csv_to_xy(path):
     y_train = np.array(yt)
     
     # norm method 1
-    mn,mx = min(y_train), max(y_train)
-    norm_y_train = np.array([2*((x-mn)/(mx-mn))-1 for x in y_train])
+    #mn,mx = min(y_train), max(y_train)
+    #norm_y_train = np.array([2*((x-mn)/(mx-mn))-1 for x in y_train])
 
     # norm method 2
     #a = sum(y_train) / len(y_train)
     #norm_y_train = np.array([x-a for x in y_train])
 
+    # norm method 3
+    mean,sigma = sum(y_train) / len(y_train), np.std(y_train)
+    norm_y_train = np.array([(x-mean)/sigma for x in y_train])
+
     return X_train, y_train, norm_y_train
 
 # use genetic algorithm to tune max_spend parameter
-def genetic_train_rnn():
-    population = []
-    X_train, y_train, norm_y_train = csv_to_xy(path)
+def genetic_train_and_test_rnn(stock, train_start, train_end, test_start, test_end, pop_size=3, n_generations=2):
 
-    for i in range(pop_size):
-        model = Sequential()
-        if use_ind_values:
-            test_strat = RNNStrategy(feed, stock, None, isTest=True)
-            test_strat.run()
-            ind_values = test_strat.get_ind_values()[1:]
+    train_path = "WIKI-%s-%s-%s-yfinance.csv" % (stock.upper(), train_start, train_end)
+    test_path = "WIKI-%s-%s-%s-yfinance.csv" % (stock.upper(), test_start, test_end)
+    X_train, y_train, norm_y_train = csv_to_xy(train_path)
 
-            X_train = [ind_values[i-window_size:i] for i in range(window_size, len(ind_values))]
-            X_train = np.reshape(np.array(X_train), (len(X_train), window_size, n_models, 1))
+    # TODO make this work for intervals != "1d"
+    train_feed = quandlfeed.Feed() #if interval.lower() == "" else GenericBarFeed(Frequency.MINUTE)
+    train_feed.addBarsFromCSV(stock, train_path)
 
-            # TODO turn this into RNN with n_models inputs per time step, using window_size
-            # TODO use separate model to predict max_spend (volatility)
+    model = Sequential()
+    if use_ind_values:
+        test_strat = RNNStrategy(train_feed, stock, None, is_test=True)
+        test_strat.run()
+        ind_values = test_strat.get_ind_values()[1:]
 
-            model.add(SimpleRNN(hidden_units, input_shape=(window_size, n_models,), activation='linear'))
-            #model.add(InputLayer(input_shape=(window_size, n_models,)))
-            model.add(Dense(units=dense_units, activation='linear'))
-            model.add(Dense(units=1, activation='linear'))
-            model.compile(loss='mean_squared_error', optimizer='adam')
-            #model.summary()
+        X_train = [ind_values[i-window_size:i] for i in range(window_size, len(ind_values))]
+        X_train = np.reshape(np.array(X_train), (len(X_train), window_size, n_models, 1))
 
-            y_train = y_train[window_size:]
-            norm_y_train = norm_y_train[window_size:]
+        # TODO turn this into RNN with n_models inputs per time step, using window_size
+        # TODO use separate model to predict max_spend (volatility)
 
-            print(X_train, norm_y_train)
+        model.add(LSTM(128, input_shape=(window_size, n_models,), activation='linear'))
+        #model.add(SimpleRNN(hidden_units, input_shape=(window_size, n_models,), activation='linear'))
+        #model.add(InputLayer(input_shape=(window_size, n_models,)))
+        model.add(Dense(units=dense_units, activation='linear'))
+        model.add(Dense(units=dense_units, activation='linear'))
+        model.add(Dense(units=1, activation='linear'))
+        model.compile(loss='mean_squared_error', optimizer='adam')
+        #model.summary()
 
-            model.fit(X_train, y_train, epochs=n_epochs)
+        y_train = y_train[window_size:]
+        norm_y_train = norm_y_train[window_size:]
 
-        else:
-            # TODO train RNN outside strategy framework, then build strategy for testing side
-            # TODO figure out how to use indicator values in training later on
-            model.add(SimpleRNN(hidden_units, input_shape=(window_size, 1), activation='linear'))
-            model.add(Dense(units=dense_units, activation='linear'))
-            model.compile(loss='mean_squared_error', optimizer='adam')
-            model.summary()
+        #print(X_train, norm_y_train)
 
-            norm_y_train = norm_y_train[window_size:]
+        # TODO go back to y_train ?
+        model.fit(X_train, norm_y_train, epochs=n_epochs)
+    else:
+        # TODO train RNN outside strategy framework, then build strategy for testing side
+        # TODO figure out how to use indicator values in training later on
 
-            model.fit(X_train, norm_y_train, epochs=n_epochs)
+        model.add(LSTM(128, input_shape=(window_size, 1), activation='linear'))
+        #model.add(SimpleRNN(hidden_units, input_shape=(window_size, 1), activation='linear'))
+        model.add(Dense(units=dense_units, activation='linear'))
+        model.add(Dense(units=dense_units, activation='linear'))
+        model.add(Dense(units=1, activation='linear'))
+        model.compile(loss='mean_squared_error', optimizer='adam')
+        model.summary()
 
-def main(stock=None, period=None, interval=""):
+        norm_y_train = norm_y_train[window_size:]
+
+        model.fit(X_train, norm_y_train, epochs=n_epochs)
+
+    population = [random() for i in range(pop_size)]
+    scores = []
+    for i in range(n_generations):
+        print("Generation %d" % (i+1))
+        for max_spend in population:
+            train_feed = quandlfeed.Feed() #if interval.lower() == "" else GenericBarFeed(Frequency.MINUTE)
+            train_feed.addBarsFromCSV(stock, train_path)
+
+            strat = RNNStrategy(train_feed, stock, model, max_spend=max_spend, is_test=False)
+            strat.run()
+
+            score = strat.getBroker().getEquity()
+            scores.append((max_spend, score))
+
+        scores.sort(key=lambda x: x[1], reverse=True)
+        print(scores)
+
+        next_pop = []
+        for i in range(n_survivors):
+            for j in range(i+1, n_survivors):
+                next_pop.append(scores[i][0]*msp_dominance + scores[j][0]*(1-msp_dominance))
+                if len(next_pop) == pop_size:
+                    break
+            if len(next_pop) == pop_size:
+                break
+        population = next_pop
+
+    genetic_msp, train_score = scores[0]
+    print("Max spend parameter: %4.2f" % (genetic_msp))
+
+    test_feed = quandlfeed.Feed() #if interval.lower() == "" else GenericBarFeed(Frequency.MINUTE)
+    test_feed.addBarsFromCSV(stock, test_path)
+
+    strat = RNNStrategy(test_feed, stock, model, max_spend=genetic_msp, is_test=False, verbose=True)
+    strat.run()
+
+    final_port_value = strat.getBroker().getEquity()
+    print("Final portfolio value: $%.2f" % final_port_value)
+
+    plt.title(stock.upper()+" using RNN Strategy")
+    plt.plot([i for i in range(len(strat.get_port_values()))], strat.get_port_values(), label="Port Value")
+    plt.plot([i for i in range(len(strat.get_port_values()))], [p*int(total_cash/strat.get_cprices()[0]) for p in strat.get_cprices()], label="Adj Share Price")
+    plt.plot([i for i in range(len(strat.get_port_values()))], strat.get_share_values(), label="Port Value in Shares")
+    plt.legend()
+    plt.show()
+
+    to_save = input("Save model? (Y or [N]): ")
+    if to_save.upper() == "Y":
+        model.save("%s-%4.2f.h5" % (stock, genetic_msp))
+
+def base_rnn(stock=None, period=None, interval=""):
     # Load the bar feed from the CSV file
     if stock is None or period is None:
         stock = sys.argv[1].lower()
@@ -286,7 +365,7 @@ def main(stock=None, period=None, interval=""):
 
     model = Sequential()
     if use_ind_values:
-        test_strat = RNNStrategy(feed, stock, None, isTest=True)
+        test_strat = RNNStrategy(feed, stock, None, is_test=True)
         test_strat.run()
         ind_values = test_strat.get_ind_values()[1:]
 
@@ -300,6 +379,7 @@ def main(stock=None, period=None, interval=""):
         #model.add(SimpleRNN(hidden_units, input_shape=(window_size, n_models,), activation='linear'))
         #model.add(InputLayer(input_shape=(window_size, n_models,)))
         model.add(Dense(units=dense_units, activation='linear'))
+        model.add(Dense(units=dense_units, activation='linear'))
         model.add(Dense(units=1, activation='linear'))
         model.compile(loss='mean_squared_error', optimizer='adam')
         #model.summary()
@@ -309,13 +389,18 @@ def main(stock=None, period=None, interval=""):
 
         #print(X_train, norm_y_train)
 
+        # TODO go back to norm_y_train ?
         model.fit(X_train, norm_y_train, epochs=n_epochs)
 
     else:
         # TODO train RNN outside strategy framework, then build strategy for testing side
         # TODO figure out how to use indicator values in training later on
-        model.add(SimpleRNN(hidden_units, input_shape=(window_size, 1), activation='linear'))
+
+        model.add(LSTM(128, input_shape=(window_size, 1), activation='linear'))
+        #model.add(SimpleRNN(hidden_units, input_shape=(window_size, 1), activation='linear'))
         model.add(Dense(units=dense_units, activation='linear'))
+        model.add(Dense(units=dense_units, activation='linear'))
+        model.add(Dense(units=1, activation='linear'))
         model.compile(loss='mean_squared_error', optimizer='adam')
         model.summary()
 
@@ -323,11 +408,12 @@ def main(stock=None, period=None, interval=""):
 
         model.fit(X_train, norm_y_train, epochs=n_epochs)
 
-    #print("Creating + running strategy")
+    # TODO create command line framework for train/test demarcation
+
     feed = quandlfeed.Feed() if interval.lower() == "" else GenericBarFeed(Frequency.MINUTE)
     feed.addBarsFromCSV(stock, path)
 
-    strat = RNNStrategy(feed, stock, model, isTest=False)
+    strat = RNNStrategy(feed, stock, model, is_test=False, verbose=True)
     strat.run()
 
     final_port_value = strat.getBroker().getEquity()
@@ -341,4 +427,4 @@ def main(stock=None, period=None, interval=""):
     plt.show()
 
 if __name__ == "__main__":
-    main()
+    genetic_train_and_test_rnn(sys.argv[1].lower(), sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5])
