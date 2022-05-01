@@ -176,7 +176,7 @@ class WeightedIndicatorStrategy(strategy.BacktestingStrategy):
         if not allow_negation:
             # w/o inversing indicators
             model_wt_values = [wt*st_onBars(self, bars) for wt,st_onBars in zip(self.__weights, self.__onBars)]
-            delta_shares = int(total_cash*self.__maxSpend*sum(model_wt_values)/c_price)
+            delta_shares = int(strat_cash*self.__maxSpend*sum(model_wt_values)/c_price)
             self.__modelWtValues = model_wt_values
         else:
             # w/ inversing indicators
@@ -186,7 +186,7 @@ class WeightedIndicatorStrategy(strategy.BacktestingStrategy):
                 res = self.__onBars[i](self, bars)
                 wt_sum += (self.__weights[2*i]*res - self.__weights[2*i+1]*res)
                 model_wt_values.extend([self.__weights[2*i]*res, -self.__weights[2*i+1]*res])
-            delta_shares = int(total_cash*self.__maxSpend*wt_sum/c_price)
+            delta_shares = int(strat_cash*self.__maxSpend*wt_sum/c_price)
             self.__modelWtValues = model_wt_values
 
         if delta_shares > 0 and strat_cash < delta_shares*c_price:
