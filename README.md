@@ -3,7 +3,9 @@
 ## Setup:
 
 python3 -m pip install pyalgotrade
+
 python3 -m pip install keras
+
 python3 -m pip install yfinance
 
 - Requires Python 3 installation, not tested with Python 2
@@ -25,12 +27,16 @@ python3 -m pip install yfinance
 - Implementation of higher leverage trading strategies like calls/puts
 - Hierarchical forecasting for stocks grouped by sector
 - Web/front-end interface for stock analysis using Flask or Django
+- Segmented RNN approach (volatility and bullishness), different normalizations
 
 ## Usage:
 
 python3 yfinance_csv.py [symbol] [period=1y] [interval=1d]
+
+python3 yfinance_csv.py * [symbols...] [period] [interval]
 - Fetches stock price of symbol on period at given interval using yfinance API
 - Cleans data of possible issues (high < close/open, low > close/open)
+- Can also fetch multiple symbols using * token
 
 python3 single_strat.py [symbol] [period=1y] [interval=1d]
 - Weighted-average of several indicators, based on weights/indicators set in code

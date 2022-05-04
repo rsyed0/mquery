@@ -58,6 +58,7 @@ use_ind_values = True
 train_msp = False
 debug = False
 
+# TODO segment RNN approach into volatility and bullishness
 class RNNStrategy(strategy.BacktestingStrategy):
     def __init__(self, feed, instrument, model, smaPeriod=15, max_spend=default_max_spend, fastEmaPeriod=12, slowEmaPeriod=26, signalEmaPeriod=9, bBandsPeriod=1, is_test=False, verbose=False):
         super(RNNStrategy, self).__init__(feed, total_cash)
