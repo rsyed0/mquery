@@ -337,6 +337,64 @@ def gfill_onBars(m_strategy, bars):
 
     return 0
 
+# energy based predictor
+# TODO implement adaptive-length, tunable-length interval
+def energy_onBars(m_strategy, bars):
+    bar = bars[m_strategy.get_instrument()]
+    n_shares = m_strategy.getBroker().getShares(m_strategy.get_instrument())
+    c_price = bar.getPrice()
+    c_basis = m_strategy.get_cbasis()
+
+    # using U/m = gh and K/m = 0.5v^2, where v = dh/dt, h is price, g is tunable (?) parameter
+    g = 1
+    threshold = 0.5
+    interval_length = 5
+
+    prev_prices = m_strategy.get_cprices()
+    if len(prev_prices) < interval_length:
+        return 0
+
+    window = prev_prices[-interval_length:]
+
+    # over an interval, if |delta U| < |delta K|, predict to continue current direction
+    # when |delta U| > |delta K|, predict to reverse current direction
+    delta_U_m = g*(c_price - window[0])
+    delta_K_m = (window[-1] - c_price)**2
+
+    wtd_val = abs(abs(delta_K_m) - abs(delta_U_m)) / (c_price * threshold)
+    pct_diff = max(-1,min(1, wtd_val**0.5))
+    #print(delta_U_m,delta_K_m,pct_diff)
+
+    if abs(delta_K_m) > abs(delta_U_m):
+        # moving faster, ride interval
+        if delta_U_m < 0:
+            return -pct_diff
+        elif delta_U_m > 0:
+            return pct_diff
+        else:
+            return 0
+    elif abs(delta_K_m) < abs(delta_U_m):
+        # moving slower, exit interval (buy the dip, sell the top)
+        if delta_U_m < 0:
+            return pct_diff
+        elif delta_U_m > 0:
+            return -pct_diff
+        else:
+            return 0
+
+def dipbuy_onBars(m_strategy, bars):
+    # TODO buy after extended drop
+    # time-based and value-based stop losses
+    # sell if no pickup, drop, or gains to threshold (stop gain)
+    bar = bars[m_strategy.get_instrument()]
+    n_shares = m_strategy.getBroker().getShares(m_strategy.get_instrument())
+    c_price = bar.getPrice()
+    c_basis = m_strategy.get_cbasis()
+
+    
+
+    return 0
+
 # TODO output -1 to 1 based on price n_ints later
 def nInts_idVal(self, prices, window_size=10, n_ints=25):
     pass

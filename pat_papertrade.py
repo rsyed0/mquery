@@ -15,6 +15,8 @@ from random import randint, random
 
 from copy import deepcopy
 
+from yfinance_csv import fetch_price_csv
+
 from strategies import *
 
 import sys
@@ -30,7 +32,7 @@ n_models = 7*(2 if allow_negation else 1)
 
 keep_best_model = False
 
-model_descs = ['SMA','RSI','SmaRsi','MACD','CBasis','GFill','History']
+model_descs = ['SMA','RSI','SmaRsi','MACD','CBasis','GFill','History'] #,'Energy']
 if allow_negation:
     nmd = []
     for s in model_descs:
@@ -42,12 +44,12 @@ total_cash = 10000
 
 class WeightedIndicatorStrategy(strategy.BacktestingStrategy):
     def __init__(self, feed, instrument, weights, smaPeriod=15, max_spend=0.25, live=False, fastEmaPeriod=12, slowEmaPeriod=26, signalEmaPeriod=9, bBandsPeriod=1, verbose=False):
-        super(WeightedIndicatorStrategy, self).__init__(feed, 10000)
+        super(WeightedIndicatorStrategy, self).__init__(feed, total_cash)
         self.__position = None
         self.__instrument = instrument
 
         self.__weights = weights
-        self.__onBars = [sma_onBars, rsi_onBars, smarsi_onBars, macd_onBars, cbasis_onBars, gfill_onBars, history_onBars]
+        self.__onBars = [sma_onBars, rsi_onBars, smarsi_onBars, macd_onBars, cbasis_onBars, gfill_onBars, history_onBars] #, energy_onBars]
         self.__cbasis = 0
 
         self.__modelWtValues = None
@@ -196,14 +198,13 @@ class WeightedIndicatorStrategy(strategy.BacktestingStrategy):
         if delta_shares < 0 and n_shares < -delta_shares:
             delta_shares = -n_shares
 
+        delta_shares = int(delta_shares)
         if self.__verbose:
-            print("Day ",len(self.__portValues),": have",n_shares,"shares and $",strat_cash, end="")
-            delta_shares = int(delta_shares)
-
+            print("Day %d: have %d shares and $%-7.2f" % (len(self.__portValues), n_shares, strat_cash), end="")
             if delta_shares > 0:
-                print(", buying",delta_shares,"shares at",c_price)
+                print(", buying %d shares at $%-7.2f" % (delta_shares, c_price))
             elif delta_shares < 0:
-                print(", selling",abs(delta_shares),"shares at",c_price)
+                print(", selling %d shares at $%-7.2f" % (abs(delta_shares), c_price))
             else:
                 print("")
             #print(gfill_onBars(self, bars))
@@ -284,20 +285,37 @@ def run_strategy(stock=None, period=None, interval=None, pop_size=50, n_generati
     high_score = 0
     best_model = None
 
+    feed = quandlfeed.Feed() if interval.lower() == "" else GenericBarFeed(Frequency.MINUTE)
+    try:
+        if len(interval) == 0:
+            feed.addBarsFromCSV(stock, "WIKI-%s-%s-yfinance.csv" % (stock.upper(), period.lower()))
+        else:
+            feed.addBarsFromCSV(stock, "WIKI-%s-%s-%s-yfinance.csv" % (stock.upper(), period.lower(), interval.lower()))
+    except:
+        if len(interval) == 0:
+            fetch_price_csv(stock.upper(), period.lower())
+            feed.addBarsFromCSV(stock, "WIKI-%s-%s-yfinance.csv" % (stock.upper(), period.lower()))
+        else:
+            fetch_price_csv(stock.upper(), period.lower(), interval.lower())
+            feed.addBarsFromCSV(stock, "WIKI-%s-%s-%s-yfinance.csv" % (stock.upper(), period.lower(), interval.lower()))
+
     try:
         for i in range(n_generations):
 
             scores = [0 for i in range(pop_size)]
             for p_i in range(pop_size):
 
-                feed = quandlfeed.Feed() if interval.lower() == "" else GenericBarFeed(Frequency.MINUTE)
+                """feed = quandlfeed.Feed() if interval.lower() == "" else GenericBarFeed(Frequency.MINUTE)
+
                 if len(interval) == 0:
                     feed.addBarsFromCSV(stock, "WIKI-%s-%s-yfinance.csv" % (stock.upper(), period.lower()))
                 else:
-                    feed.addBarsFromCSV(stock, "WIKI-%s-%s-%s-yfinance.csv" % (stock.upper(), period.lower(), interval.lower()))
+                    feed.addBarsFromCSV(stock, "WIKI-%s-%s-%s-yfinance.csv" % (stock.upper(), period.lower(), interval.lower()))"""
+
+                strat_feed = deepcopy(feed)
 
                 # run strategy, save score
-                strat = WeightedIndicatorStrategy(feed, stock, population[p_i][0], max_spend=population[p_i][1]) #verbose=p_i==0)
+                strat = WeightedIndicatorStrategy(strat_feed, stock, population[p_i][0], max_spend=population[p_i][1]) #verbose=p_i==0)
                 strat.run()
                 score = strat.getBroker().getEquity()
                 #print(population[p_i],score)
@@ -326,11 +344,11 @@ def run_strategy(stock=None, period=None, interval=None, pop_size=50, n_generati
         if best_model is None:
             sys.exit(1)
 
-    feed = quandlfeed.Feed() if interval.lower() == "" else GenericBarFeed(Frequency.MINUTE)
+    """feed = quandlfeed.Feed() if interval.lower() == "" else GenericBarFeed(Frequency.MINUTE)
     if len(interval) == 0:
         feed.addBarsFromCSV(stock, "WIKI-%s-%s-yfinance.csv" % (stock.upper(), period.lower()))
     else:
-        feed.addBarsFromCSV(stock, "WIKI-%s-%s-%s-yfinance.csv" % (stock.upper(), period.lower(), interval.lower()))
+        feed.addBarsFromCSV(stock, "WIKI-%s-%s-%s-yfinance.csv" % (stock.upper(), period.lower(), interval.lower()))"""
 
     myStrategy = WeightedIndicatorStrategy(feed, stock, best_model[0], max_spend=best_model[1], verbose=verbose)
     myStrategy.run()

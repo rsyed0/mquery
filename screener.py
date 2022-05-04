@@ -4,6 +4,8 @@ from strategies import *
 import sys, os
 import matplotlib.pyplot as plt
 
+from datetime import date
+
 total_cash = 10000
 
 def main():
@@ -82,6 +84,7 @@ def main():
         plt.annotate(label.upper(), (exposures[i]+dot_diameter, ratings[i]+dot_diameter))
 
     plt.show()
+
     plt.clf()
 
     performance = [x[3] for x in scores]
@@ -95,9 +98,17 @@ def main():
 
     plt.show()
 
+    # save all models to screener_models_050222.txt
+    today = date.today()
+    with open('screener_models_%s.txt' % (today.strftime('%m%d%y')), 'w') as f:
+        for sym,_,_,_,msp,model in scores:
+            f.write("%s:%s, %4.2f" % (sym,str(model.get_weights()),msp))
+        f.close()
+
     # allow user to examine models for certain stocks
     u_input = ""
     sym_to_model = {sym:model for sym,_,_,_,_,model in scores}
+
     while not u_input == "!q":
         u_input = input("Enter symbol(s) to examine: ")
         tokens = u_input.split(" ")

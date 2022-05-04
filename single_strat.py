@@ -18,7 +18,7 @@ from strategies import *
 import sys
 
 total_cash = 10000
-max_spend = 0.4377 #0.25
+max_spend = 1 #0.25 #0.4377
 
 smaPeriod = 15
 
@@ -32,7 +32,7 @@ class MyStrategy(strategy.BacktestingStrategy):
         #self.setUseAdjustedValues(True)
 
         self.__weights = weights
-        self.__onBars = [sma_onBars, rsi_onBars, smarsi_onBars, macd_onBars, cbasis_onBars, gfill_onBars, history_onBars]
+        self.__onBars = [sma_onBars, rsi_onBars, smarsi_onBars, macd_onBars, cbasis_onBars, gfill_onBars, history_onBars, energy_onBars]
         self.__cbasis = 0
         assert len(self.__weights) == len(self.__onBars) and isclose(sum(self.__weights), 1)
 
@@ -169,8 +169,8 @@ class MyStrategy(strategy.BacktestingStrategy):
         self.__cprices.append(c_price)
         self.__shareValues.append(n_shares*c_price)
 
-best_model = [0.5240942184198141, 0.011991984061265401, 0.03332160740001963, 0.11681458821783589, 0.11902285924129916, 0.19005406060851363, 0.004700682051251965]
-#best_model = [0,0,0,0,0,0,1]
+#best_model = [0.5240942184198141, 0.011991984061265401, 0.03332160740001963, 0.11681458821783589, 0.11902285924129916, 0.19005406060851363, 0.004700682051251965]
+best_model = [0,0,0,0,0,0,0,1]
 stock = sys.argv[1].lower()
 period = sys.argv[2].lower() if len(sys.argv) >= 3 else "1y"
 interval = sys.argv[3].lower() if len(sys.argv) >= 4 else ""
@@ -187,7 +187,7 @@ myStrategy = MyStrategy(feed, stock, smaPeriod, best_model, verbose=True)
 myStrategy.run()
 print("Final portfolio value: $%.2f" % myStrategy.getBroker().getEquity())
 
-plt.title(stock.upper()+" "+str([str(x)[:4] for x in best_model]))
+plt.title("%s msp=%4.2f %s" % (stock.upper(), max_spend, str([str(x)[:4] for x in best_model])))
 plt.plot([i for i in range(len(myStrategy.get_port_values()))], myStrategy.get_port_values(), label="Port Value")
 #plt.show()
 plt.plot([i for i in range(len(myStrategy.get_port_values()))], [p*int(total_cash/myStrategy.get_cprices()[0]) for p in myStrategy.get_cprices()], label="Adj Share Price")

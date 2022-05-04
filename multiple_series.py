@@ -14,9 +14,11 @@ n_models = 7*(2 if allow_negation else 1)
 
 keep_best_model = False
 
+total_cash = 10000
+
 class MultipleWeightedIndicatorStrategy(strategy.BacktestingStrategy):
     def __init__(self, feed, instruments, weights):
-        super(WeightedIndicatorStrategy, self).__init__(feed, 10000)
+        super(MultipleWeightedIndicatorStrategy, self).__init__(feed, total_cash)
 
 def normalize(model):
     # make so that all vals sum to 1
@@ -64,7 +66,8 @@ def main():
             pop_member.append(normalize([random() for i in range(n_models)]))
         population.append(pop_member)
 
-    this_strategy = MultipleWeightedIndicatorStrategy(feed, instruments, )
+    for i in range(pop_size):
+        this_strategy = MultipleWeightedIndicatorStrategy(feed, instruments, population[i])
 
     print(symbols)
 
