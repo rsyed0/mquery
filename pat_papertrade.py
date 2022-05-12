@@ -42,8 +42,16 @@ if allow_negation:
 
 total_cash = 10000
 
+fastEmaPeriod = 12
+slowEmaPeriod = 26
+signalEmaPeriod = 9
+bBandsPeriod = 1
+smaPeriod = 15
+
+default_max_spend = 0.25
+
 class WeightedIndicatorStrategy(strategy.BacktestingStrategy):
-    def __init__(self, feed, instrument, weights, smaPeriod=15, max_spend=0.25, live=False, fastEmaPeriod=12, slowEmaPeriod=26, signalEmaPeriod=9, bBandsPeriod=1, verbose=False):
+    def __init__(self, feed, instrument, weights, max_spend=default_max_spend, live=False, verbose=False, trade=True, parent_strat=None, total_cash=total_cash):
         super(WeightedIndicatorStrategy, self).__init__(feed, total_cash)
         self.__position = None
         self.__instrument = instrument
@@ -70,6 +78,8 @@ class WeightedIndicatorStrategy(strategy.BacktestingStrategy):
         self.__bb = bollinger.BollingerBands(feed[instrument].getPriceDataSeries(), bBandsPeriod, 2)
 
         self.__verbose = verbose
+        self.__trade = trade
+        self.__parentStrat = parent_strat
 
         # TODO decide if this is needed
         if live:
@@ -167,8 +177,71 @@ class WeightedIndicatorStrategy(strategy.BacktestingStrategy):
         # If the exit was canceled, re-submit it.
         self.__position.exitMarket()
 
+    def trade_cash(self, cash):
+        c_price = self.__cprices[-1]
+        strat_cash = self.get_cash()
+
+        if len(c_price) == 0:
+            return 1
+
+        if cash > strat_cash:
+            cash = strat_cash
+
+        delta_shares = cash / c_price
+        if not delta_shares == 0:
+            self.marketOrder(self.__instrument, delta_shares)
+
+        if not self.__trade:
+            print("Day %d: have %d %s shares and $%-7.2f" % (len(self.__portValues), n_shares, strat_cash), end="")
+            if delta_shares > 0:
+                print(", buying %d %s shares at $%-7.2f" % (delta_shares, self.__instrument.upper(), c_price))
+            elif delta_shares < 0:
+                print(", selling %d %s shares at $%-7.2f" % (abs(delta_shares), self.__instrument.upper(), c_price))
+            else:
+                print("")
+
+        # TODO deal with issues when order is not filled
+        return -delta_shares * c_price
+
+    def trade_shares(self, delta_shares):
+        c_price = self.__cprices[-1]
+        n_shares = self.get_n_shares()
+        strat_cash = self.get_cash()
+
+        if n_shares + delta_shares < 0:
+            delta_shares = -n_shares
+
+        if c_price * delta_shares > strat_cash:
+            delta_shares = int(strat_cash/c_price)
+
+        if not delta_shares == 0:
+            self.marketOrder(self.__instrument, delta_shares)
+
+        if not self.__trade:
+            print("Day %d: have %d %s shares and $%-7.2f" % (len(self.__portValues), n_shares, self.__instrument.upper(), strat_cash), end="")
+            if delta_shares > 0:
+                print(", buying %d %s shares at $%-7.2f" % (delta_shares, self.__instrument.upper(), c_price))
+            elif delta_shares < 0:
+                print(", selling %d %s shares at $%-7.2f" % (abs(delta_shares), self.__instrument.upper(), c_price))
+            else:
+                print("")
+
+        return -delta_shares * c_price
+
+    def get_cash(self):
+        if len(c_price) == 0:
+            return 1
+
+        n_shares = self.getBroker().getShares(self.get_instrument())
+        c_price = self.__cprices[-1]
+        port_value = self.getBroker().getEquity()
+        return port_value - n_shares * c_price
+
+    def get_n_shares(self):
+        return self.getBroker().getShares(self.get_instrument())
+
     # IMPLEMENTATION OF STRATEGY
-    # TODO save values of each indicator along data interval to avoid recalculation
+    # TODO save values of each indicator along data interval to avoid recalculation when training msp
     def onBars(self, bars):
         n_shares = self.getBroker().getShares(self.get_instrument())
         bar = bars[self.get_instrument()]
@@ -211,12 +284,18 @@ class WeightedIndicatorStrategy(strategy.BacktestingStrategy):
 
         #print([st_onBars(self, bars) for st_onBars in self.__onBars])
 
-        if not delta_shares == 0:
-            self.marketOrder(self.__instrument, delta_shares)
-            self.__cbasis = (n_shares*self.__cbasis + delta_shares*c_price) / (n_shares + delta_shares) if not n_shares + delta_shares == 0 else 0
         self.__portValues.append(self.getBroker().getEquity())
         self.__cprices.append(c_price)
         self.__shareValues.append(n_shares*c_price)
+        
+        #if self.__trade:
+
+        if not delta_shares == 0:
+            self.marketOrder(self.__instrument, delta_shares)
+            self.__cbasis = (n_shares*self.__cbasis + delta_shares*c_price) / (n_shares + delta_shares) if not n_shares + delta_shares == 0 else 0
+
+        #else:
+        #    self.__parentStrat.notify(self.__instrument, len(self.__cprices), model_wt_values)
 
 def cross(model_a, model_b, n_children=2):
     # equal weighted sum of both probs
@@ -281,9 +360,7 @@ def run_strategy(stock=None, period=None, interval=None, pop_size=50, n_generati
                 n -= 1
         population.append((normalize(probs),random()))
 
-    #print(population)
-    high_score = 0
-    best_model = None
+    high_score, best_model = 0, None 
 
     feed = quandlfeed.Feed() if interval.lower() == "" else GenericBarFeed(Frequency.MINUTE)
     try:
@@ -304,14 +381,6 @@ def run_strategy(stock=None, period=None, interval=None, pop_size=50, n_generati
 
             scores = [0 for i in range(pop_size)]
             for p_i in range(pop_size):
-
-                """feed = quandlfeed.Feed() if interval.lower() == "" else GenericBarFeed(Frequency.MINUTE)
-
-                if len(interval) == 0:
-                    feed.addBarsFromCSV(stock, "WIKI-%s-%s-yfinance.csv" % (stock.upper(), period.lower()))
-                else:
-                    feed.addBarsFromCSV(stock, "WIKI-%s-%s-%s-yfinance.csv" % (stock.upper(), period.lower(), interval.lower()))"""
-
                 strat_feed = deepcopy(feed)
 
                 # run strategy, save score

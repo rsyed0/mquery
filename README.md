@@ -22,7 +22,6 @@ python3 -m pip install yfinance
 
 ## Planned features:
 
-- Implementation of multiple-ticker algotrading strategy using RNNs
 - Usage of quanttrader API to use live data/perform live trading
 - Implementation of higher leverage trading strategies like calls/puts
 - Hierarchical forecasting for stocks grouped by sector
@@ -59,3 +58,9 @@ python3 screener.py [period] [interval]
 - Generates two scatter plots (exposure vs buy/sell, performance vs bullishness)
 - Allows user to examine line plot and weights for each stock/classifier performance 
 - Saves each classifier in a file called screener_[mmddyy].txt
+
+python3 multiple_series.py [symbols...] [period=1y] [interval=1d]
+- Weighted-average of several indicators over several symbols, tuned using genetic algorithm
+- Will accumulate shares of multiple symbols within same portfolio to maximize returns
+- Generates line plot to show time-series exposure and performance of algorithm on period
+- Can be customized by adding strategies to strategies.py

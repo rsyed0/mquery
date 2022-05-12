@@ -17,14 +17,14 @@ from strategies import *
 
 import sys
 
-total_cash = 10000
+total_cash = 100000
 max_spend = 1 #0.25 #0.4377
 
 smaPeriod = 15
 
 class MyStrategy(strategy.BacktestingStrategy):
     def __init__(self, feed, instrument, smaPeriod, weights, live=False, fastEmaPeriod=12, slowEmaPeriod=26, signalEmaPeriod=9, bBandsPeriod=1, verbose=False):
-        super(MyStrategy, self).__init__(feed, 10000)
+        super(MyStrategy, self).__init__(feed, total_cash)
         self.__position = None
         self.__instrument = instrument
 
@@ -32,12 +32,14 @@ class MyStrategy(strategy.BacktestingStrategy):
         #self.setUseAdjustedValues(True)
 
         self.__weights = weights
-        self.__onBars = [sma_onBars, rsi_onBars, smarsi_onBars, macd_onBars, cbasis_onBars, gfill_onBars, history_onBars, energy_onBars]
+        self.__onBars = [sma_onBars, rsi_onBars, smarsi_onBars, macd_onBars, cbasis_onBars, gfill_onBars, history_onBars, energy_onBars, dipbuy_onBars]
         self.__cbasis = 0
         assert len(self.__weights) == len(self.__onBars) and isclose(sum(self.__weights), 1)
 
         self.__lastTop, self.__lastBottom, self.__trend, self.__trendLength = None, None, 0, 0
         self.__portValues, self.__shareValues, self.__cprices = [], [], []
+
+        self.__startPrice, self.__startTime = -1, -1
 
         self.__sma = ma.SMA(feed[instrument].getPriceDataSeries(), smaPeriod)
         self.__rsi = rsi.RSI(feed[instrument].getPriceDataSeries(), smaPeriod)
@@ -58,6 +60,18 @@ class MyStrategy(strategy.BacktestingStrategy):
             self.__bid = bid
             self.__ask = ask
             self.info("Order book updated. Best bid: %s. Best ask: %s" % (self.__bid, self.__ask))
+
+    def get_start_price(self):
+        return self.__startPrice
+
+    def set_start_price(self, start_price):
+        self.__startPrice = start_price
+
+    def get_start_time(self):
+        return self.__startTime
+
+    def set_start_time(self, start_time):
+        self.__startTime = start_time
 
     def set_position(self, position):
         self.__position = position
@@ -170,7 +184,7 @@ class MyStrategy(strategy.BacktestingStrategy):
         self.__shareValues.append(n_shares*c_price)
 
 #best_model = [0.5240942184198141, 0.011991984061265401, 0.03332160740001963, 0.11681458821783589, 0.11902285924129916, 0.19005406060851363, 0.004700682051251965]
-best_model = [0,0,0,0,0,0,0,1]
+best_model = [0,0,0,0,0,0,0,0,1]
 stock = sys.argv[1].lower()
 period = sys.argv[2].lower() if len(sys.argv) >= 3 else "1y"
 interval = sys.argv[3].lower() if len(sys.argv) >= 4 else ""

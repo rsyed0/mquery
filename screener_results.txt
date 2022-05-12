@@ -70,3 +70,10 @@ Holding: AMC, SOXL, XLF, GBTC, WFC, BABA, DNN, BMRN, XPEV, MCD, LKNCY
 Bearish: TWTR, ABNB, KODK, FB, 
 Zeroing: TQQQ, LCID, JETS, DAL, AAL, LYFT, PDD, UVXY, SNOW, MARA, F, GM,
          FSLY
+
+5-5-2022
+
+Bullish:
+Holding:
+Bearish:
+Zeroing: 

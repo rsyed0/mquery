@@ -1,10 +1,15 @@
 from pandas import read_csv
 import numpy as np
+
 from keras.models import Sequential
 from keras.layers import Dense, SimpleRNN, InputLayer, LSTM, Dropout
+#from keras.optimizers import SGD
+
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error
+
 import math
+
 import matplotlib.pyplot as plt
 
 import tensorflow as tf
@@ -33,16 +38,16 @@ default_max_spend = 0.05
 
 pct_adj = 0.1
 
-window_size = 25
-fwd_window_size = 15 # too much?
+window_size = 30
+fwd_window_size = 20 # too little?
 
-total_cash = 10000
-n_models = 8
+total_cash = 100000
+n_models = 6
 
-n_epochs = 15 # 25 - overfit?
+n_epochs = 20 # 25 - overfit?
 
-hidden_units = 2
-dense_units = 10
+#hidden_units = 2
+dense_units = 64
 lstm_units = 128
 
 use_ind_values = True
@@ -56,7 +61,7 @@ class RNNStrategy(strategy.BacktestingStrategy):
         self.__instrument = instrument
         self.__model = model
 
-        self.__onBars = [sma_onBars, rsi_onBars, smarsi_onBars, macd_onBars, cbasis_onBars, gfill_onBars, history_onBars, energy_onBars]
+        self.__onBars = [sma_onBars, rsi_onBars, smarsi_onBars, macd_onBars, cbasis_onBars, gfill_onBars] #history_onBars, energy_onBars]
         self.__cbasis = 0
 
         assert n_models == len(self.__onBars)
@@ -278,7 +283,10 @@ def genetic_train_and_test_rnn(stock, train_start, train_end, test_start, test_e
         model.add(Dense(units=dense_units, activation='linear'))
         model.add(Dropout(0.2))
         model.add(Dense(units=1, activation='tanh'))
-        model.compile(loss='mean_squared_error', optimizer='adam')
+
+        #model.compile(loss='mean_squared_error', optimizer='adam')
+        #opt = SGD(lr=0.01, momentum=0.9)
+        model.compile(loss='hinge', optimizer='adam')
 
         if debug:
             model.summary()
@@ -301,7 +309,10 @@ def genetic_train_and_test_rnn(stock, train_start, train_end, test_start, test_e
         model.add(Dense(units=dense_units, activation='linear'))
         model.add(Dropout(0.2))
         model.add(Dense(units=1, activation='tanh'))
-        model.compile(loss='mean_squared_error', optimizer='adam')
+
+        #model.compile(loss='mean_squared_error', optimizer='adam')
+        #opt = SGD(lr=0.01, momentum=0.9)
+        model.compile(loss='hinge', optimizer='adam')
 
         if debug:
             model.summary()
@@ -386,6 +397,12 @@ def genetic_train_and_test_rnn(stock, train_start, train_end, test_start, test_e
 
         model.save(model_save_fname)
         print("Saved model as %s" % (model_save_fname))
+
+def use_existing_h5(fn_h5, train_start, train_end, test_start, test_end, pop_size=3, n_generations=2):
+    pass
+
+def evaluate_loss(stock=None, period=None, interval=""):
+    pass
 
 def base_rnn(stock=None, period=None, interval=""):
     # Load the bar feed from the CSV file
@@ -474,4 +491,7 @@ def base_rnn(stock=None, period=None, interval=""):
     plt.show()
 
 if __name__ == "__main__":
-    genetic_train_and_test_rnn(sys.argv[1].lower(), sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5])
+    if sys.argv[1][-3:] == '.h5':
+        use_existing_h5(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5])
+    else:
+        genetic_train_and_test_rnn(sys.argv[1].lower(), sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5])

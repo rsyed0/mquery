@@ -1,6 +1,8 @@
 from pat_papertrade import *
 from strategies import *
 
+from yfinance_csv import *
+
 import sys, os
 import matplotlib.pyplot as plt
 
@@ -120,6 +122,9 @@ def main():
                 model_weights = model.get_weights()
                 model_max_spend = model.get_max_spend()
 
+                # re-fetch data
+                fetch_price_csv(stock, period, interval)
+
                 feed = quandlfeed.Feed() if interval.lower() == "1d" else GenericBarFeed(Frequency.MINUTE)
                 if interval == "1d":
                     feed.addBarsFromCSV(stock, "WIKI-%s-%s-yfinance.csv" % (stock.upper(), period.lower()))
@@ -151,6 +156,9 @@ def main():
                 model = sym_to_model[s1]
                 model_weights = model.get_weights()
                 model_max_spend = model.get_max_spend()
+
+                # re-fetch data
+                fetch_price_csv(s2, period, interval)
 
                 feed = quandlfeed.Feed() if interval.lower() == "1d" else GenericBarFeed(Frequency.MINUTE)
                 if interval == "1d":
