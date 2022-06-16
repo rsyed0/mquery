@@ -222,7 +222,7 @@ class MultipleWeightedIndicatorStrategy(strategy.BacktestingStrategy):
 
             if not delta_shares == 0:
                 if self.__verbose:
-                    print("Day %d: bought %d shares of %s at $%7.2f" % (len(self.__cprices[instrument])+1, delta_shares, instrument.upper(), c_prices[instrument]))
+                    print("Day %d: bought %d shares of %s at $%-7.2f" % (len(self.__cprices[instrument])+1, delta_shares, instrument.upper(), c_prices[instrument]))
                 self.marketOrder(instrument, delta_shares)
                 self.__cbasis[instrument] = (n_shares*self.__cbasis[instrument] + delta_shares*c_prices[instrument]) / (n_shares + delta_shares)
 
@@ -355,7 +355,7 @@ def main():
 
     feeds = deepcopy(orig_feeds)
     ovr_feed = deepcopy(orig_ovr_feed)
-    best_strategy = MultipleWeightedIndicatorStrategy(feeds, ovr_feed, instruments, best_model[0], max_spend=best_model[1])
+    best_strategy = MultipleWeightedIndicatorStrategy(feeds, ovr_feed, instruments, best_model[0], max_spend=best_model[1], verbose=True)
     best_strategy.run()
 
     print(best_model)

@@ -4,14 +4,14 @@ from pyalgotrade.technical import ma, rsi, macd, bollinger
 
 from multiple_series import MultipleWeightedIndicatorStrategy
 
-from math import sqrt, sin, exp
+from math import sqrt, sin, exp, atan
 
 total_cash = 10000
 
 # strategy 1: SMA 
 def sma_onBars(m_strategy, bars, instrument=None):
     if instrument is not None: #isinstance(m_strategy, MultipleWeightedIndicatorStrategy):
-        if m_strategy.get_sma(instrument)[-1] is None:
+        if len(m_strategy.get_sma(instrument)) == 0 or m_strategy.get_sma(instrument)[-1] is None:
             return 0
 
         bar = bars[instrument]
@@ -38,7 +38,7 @@ def sma_onBars(m_strategy, bars, instrument=None):
 # strategy 2: RSI
 def rsi_onBars(m_strategy, bars, instrument=None):
     if instrument is not None: #isinstance(m_strategy, MultipleWeightedIndicatorStrategy):
-        if m_strategy.get_rsi(instrument)[-1] is None:
+        if len(m_strategy.get_rsi(instrument)) == 0 or m_strategy.get_rsi(instrument)[-1] is None:
             return 0
 
         bar = bars[instrument]
@@ -65,7 +65,7 @@ def rsi_onBars(m_strategy, bars, instrument=None):
 # strategy 1+2: SMA+RSI
 def smarsi_onBars(m_strategy, bars, instrument=None):
     if instrument is not None: #isinstance(m_strategy, MultipleWeightedIndicatorStrategy):
-        if m_strategy.get_sma(instrument)[-1] is None or m_strategy.get_rsi(instrument)[-1] is None:
+        if len(m_strategy.get_sma(instrument)) == 0 or len(m_strategy.get_rsi(instrument)) == 0 or m_strategy.get_sma(instrument)[-1] is None or m_strategy.get_rsi(instrument)[-1] is None:
             return 0
 
         # use SMA to inform RSI cutoffs (30/70 by default)
@@ -112,7 +112,7 @@ def smarsi_onBars(m_strategy, bars, instrument=None):
 # strategy 3: MACD
 def macd_onBars(m_strategy, bars, instrument=None):
     if instrument is not None: #isinstance(m_strategy, MultipleWeightedIndicatorStrategy):
-        if m_strategy.get_macd(instrument).getHistogram()[-1] is None:
+        if len(m_strategy.get_macd(instrument).getHistogram()) == 0 or m_strategy.get_macd(instrument).getHistogram()[-1] is None:
             return 0
 
         # increase number of bought/sold shares with each day above/below 0
@@ -141,7 +141,7 @@ def macd_onBars(m_strategy, bars, instrument=None):
 # strategy 4: Bollinger bands
 def bb_onBars(m_strategy, bars, instrument=None):
     if instrument is not None: #isinstance(m_strategy, MultipleWeightedIndicatorStrategy):
-        if m_strategy.get_bb(instrument).getLowerBand()[-1] is None:
+        if len(m_strategy.get_bb(instrument).getLowerBand()) == 0 or m_strategy.get_bb(instrument).getLowerBand()[-1] is None:
             return 0
 
         bar = bars[instrument]
@@ -585,6 +585,54 @@ def dipbuy_onBars(m_strategy, bars):
             return -1
 
     return 0
+
+# strategy: upward/downward/sideways channel classifier
+def channel_onBars(m_strategy, bars):
+    bar = bars[m_strategy.get_instrument()]
+    n_shares = m_strategy.getBroker().getShares(m_strategy.get_instrument())
+    c_price = bar.getPrice()
+    c_basis = m_strategy.get_cbasis()
+
+    pct_width = 0.15
+    interval_length = 20
+
+    lt_trend_wt, st_trend_wt = 0.5, 0.5
+
+    if len(m_strategy.get_cprices()) < interval_length:
+        return 0
+
+    window = m_strategy.get_cprices()[-interval_length:]
+    min_price, max_price = min(window), max(window)
+
+    min_slope, max_slope = 0, 0
+    for day in range(1,interval_length):
+        price = window[day]
+        slope = (price - window[0]) / day
+
+        min_slope = min(min_slope, slope)
+        max_slope = max(max_slope, slope)
+
+    channel_slope = ((min_slope + max_slope) / 2)
+    channel_width = (channel_slope - min_slope)
+
+    mid_band = window[0] + channel_slope * interval_length
+    c_price_width = (c_price - mid_band) / c_price
+
+    # + long term buy/sell - short term overbought/oversold
+    lt_trend = channel_slope / c_price
+    st_trend = c_price_width / pct_width
+    return max(-1, min(1, (lt_trend * lt_trend_wt) - (st_trend * st_trend_wt)))
+
+    """channel_slope = (c_price - window[0]) / interval_length
+
+    low_band, high_band = 0, 0
+    for day in range(interval_length):
+        mid_band = window[0] + channel_slope * day 
+        #low_band, high_band = mid_band - pct_width * c_price, mid_band + pct_width * c_price
+
+        low_band = min(low_band, (window[day] - mid_band) / c_price)
+        high_band = max(high_band, (window[day] - mid_band) / c_price)"""
+
 
 # TODO output -1 to 1 based on price n_ints later
 def nInts_idVal(self, prices, window_size=10, n_ints=25):

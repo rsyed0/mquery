@@ -32,7 +32,7 @@ class MyStrategy(strategy.BacktestingStrategy):
         #self.setUseAdjustedValues(True)
 
         self.__weights = weights
-        self.__onBars = [sma_onBars, rsi_onBars, smarsi_onBars, macd_onBars, cbasis_onBars, gfill_onBars, history_onBars, energy_onBars, dipbuy_onBars]
+        self.__onBars = [sma_onBars, rsi_onBars, smarsi_onBars, macd_onBars, cbasis_onBars, gfill_onBars, history_onBars, energy_onBars, dipbuy_onBars, channel_onBars]
         self.__cbasis = 0
         assert len(self.__weights) == len(self.__onBars) and isclose(sum(self.__weights), 1)
 
@@ -184,7 +184,7 @@ class MyStrategy(strategy.BacktestingStrategy):
         self.__shareValues.append(n_shares*c_price)
 
 #best_model = [0.5240942184198141, 0.011991984061265401, 0.03332160740001963, 0.11681458821783589, 0.11902285924129916, 0.19005406060851363, 0.004700682051251965]
-best_model = [0,0,0,0,0,0,0,0,1]
+best_model = [0,0,0,0,0,0,0,0,0,1]
 stock = sys.argv[1].lower()
 period = sys.argv[2].lower() if len(sys.argv) >= 3 else "1y"
 interval = sys.argv[3].lower() if len(sys.argv) >= 4 else ""
