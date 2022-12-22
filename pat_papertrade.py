@@ -50,8 +50,11 @@ smaPeriod = 15
 
 default_max_spend = 0.25
 
-HIDDEN_SIZE_1 = 4
-HIDDEN_SIZE_2 = 2
+HIDDEN_SIZE_1 = 10
+HIDDEN_SIZE_2 = 3
+
+nn_window_based = True
+nn_window_size = 30
 
 class RLNeuralNetworkStrategy(strategy.BacktestingStrategy):
     def __init__(self, feed, instrument, weights=None, max_spend=default_max_spend, live=False, verbose=False, trade=True, parent_strat=None, total_cash=total_cash):
@@ -60,7 +63,7 @@ class RLNeuralNetworkStrategy(strategy.BacktestingStrategy):
         self.__instrument = instrument
 
         self.__onBars = [sma_onBars, rsi_onBars, smarsi_onBars, macd_onBars, cbasis_onBars, gfill_onBars, history_onBars] #, energy_onBars]
-        self.__nnShape = (len(self.__onBars), HIDDEN_SIZE_1, HIDDEN_SIZE_2, 1)
+        self.__nnShape = (nn_window_size, HIDDEN_SIZE_1, HIDDEN_SIZE_2, 1) if nn_window_based else (len(self.__onBars), HIDDEN_SIZE_1, HIDDEN_SIZE_2, 1)
         self.__cbasis = 0
 
         self.__weights = [[[2*random()-1 for i in range(self.__nnShape[i-1])] for j in range(self.__nnShape[i])] for i in range(1,len(self.__nnShape))] if weights is None else weights
@@ -267,25 +270,33 @@ class RLNeuralNetworkStrategy(strategy.BacktestingStrategy):
         c_price = bar.getPrice()
         strat_cash = self.getBroker().getCash(False)
 
-        onBars_result = [st_onBars(self, bars) for st_onBars in self.__onBars]
+        delta_shares = 0
+        node_vals = None
 
-        node_vals = onBars_result
+        if nn_window_based:
+            if len(self.__cprices) >= nn_window_size:
+                window = self.__cprices[-nn_window_size:] + [c_price]
+                node_vals = [(window[i+1]-window[i])/window[i] for i in range(nn_window_size)]
+        else:
+            onBars_result = [st_onBars(self, bars) for st_onBars in self.__onBars]
+            node_vals = onBars_result
 
-        # TODO feed thru NN
-        for layer_i in range(len(self.__weights)):
-            layer_wts = self.__weights[layer_i]
-            node_vals = [sum([node_val*wt for node_val, wt in zip(node_vals, wts)]) for wts in layer_wts]
+        if not (nn_window_based and len(self.__cprices) < nn_window_size):
+            # feed thru NN
+            for layer_i in range(len(self.__weights)):
+                layer_wts = self.__weights[layer_i]
+                node_vals = [sum([node_val*wt for node_val, wt in zip(node_vals, wts)]) for wts in layer_wts]
 
-        # node_vals[0] is now the buy/sell indicator
-        wt_sum = node_vals[0]
-        delta_shares = int(total_cash*self.__maxSpend*wt_sum/c_price)
+            # node_vals[0] is now the buy/sell indicator
+            wt_sum = node_vals[0]
+            delta_shares = int(total_cash*self.__maxSpend*wt_sum/c_price)
 
-        if delta_shares > 0 and strat_cash < delta_shares*c_price:
-            delta_shares = int(strat_cash/c_price)
+            if delta_shares > 0 and strat_cash < delta_shares*c_price:
+                delta_shares = int(strat_cash/c_price)
 
-        # prevent short selling
-        if delta_shares < 0 and n_shares < -delta_shares:
-            delta_shares = -n_shares
+            # prevent short selling
+            if delta_shares < 0 and n_shares < -delta_shares:
+                delta_shares = -n_shares
 
         delta_shares = int(delta_shares)
         if self.__verbose:
@@ -296,15 +307,10 @@ class RLNeuralNetworkStrategy(strategy.BacktestingStrategy):
                 print(", selling %d shares at $%-7.2f" % (abs(delta_shares), c_price))
             else:
                 print("")
-            #print(gfill_onBars(self, bars))
-
-        #print([st_onBars(self, bars) for st_onBars in self.__onBars])
 
         self.__portValues.append(self.getBroker().getEquity())
         self.__cprices.append(c_price)
         self.__shareValues.append(n_shares*c_price)
-        
-        #if self.__trade:
 
         if not delta_shares == 0:
             self.marketOrder(self.__instrument, delta_shares)
