@@ -42,10 +42,11 @@ python3 single_strat.py [symbol] [period=1y] [interval=1d]
 - Generates line plot to show time-series exposure and performance of algorithm on period
 - Useful for testing performance of single classifier, especially when creating custom
 
-python3 pat_algotrade.py [symbol] [period=1y] [interval=1d]
-- Weighted-average of several indicators, tuned using genetic algorithm
+python3 pat_papertrade.py [symbol] [period=1y] [interval=1d]
+- Weighted-average of several indicators, tuned using genetic reinforcement learning algorithm
 - Generates line plot to show time-series exposure and performance of algorithm on period
 - Can be customized by adding strategies to strategies.py
+- Can use simple weighted-indicator model or a neural network model 
 
 python3 rnn_algotrade.py [symbol] [train_start] [train_end] [test_start] [test_end]
 - LSTM RNN model trained to use indicator outputs as input

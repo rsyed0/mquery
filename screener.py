@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 from datetime import date
 
-total_cash = 10000
+total_cash = 100000
 
 def main():
     period = sys.argv[1]

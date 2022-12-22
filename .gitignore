@@ -1,3 +1,4 @@
 *.csv
 *.h5
 screener_results.txt
+newstrader/api_keys.txt

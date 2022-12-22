@@ -185,9 +185,9 @@ class RNNStrategy(strategy.BacktestingStrategy):
                     print(x,res)
 
                 if self.__fourier:
-                    delta_shares = int(self.__maxSpend*total_cash*sum([wt*r for wt,r in zip(fourier_time_weights,res[0])]))
+                    delta_shares = int(self.__maxSpend*total_cash*sum([wt*r for wt,r in zip(fourier_time_weights,res[0])]) / c_price)
                 else:
-                    delta_shares = int(self.__maxSpend*total_cash*res)
+                    delta_shares = int(self.__maxSpend*total_cash*res / c_price)
                 self.__window = np.delete(self.__window, 0)
             else:
                 delta_shares = 0
@@ -196,7 +196,7 @@ class RNNStrategy(strategy.BacktestingStrategy):
             delta_shares = -n_shares
 
         if delta_shares > 0 and strat_cash < delta_shares*c_price:
-            delta_shares = int(strat_cash/c_price)
+            delta_shares = int(strat_cash / c_price)
         
         if self.__verbose:
             print("Day %d: have %d shares and $%-7.2f" % (len(self.__portValues), n_shares, strat_cash), end="")

@@ -2,7 +2,7 @@ import yfinance as yf
 
 import sys
 
-def fetch_price_csv(ticker_name=None, ticker_period=None, ticker_interval=None, verbose=False):
+def fetch_price_csv(ticker_name=None, ticker_period=None, ticker_interval=None, verbose=False, save=True):
     if ticker_name is None or ticker_period is None or ticker_interval is None:
         ticker_name = sys.argv[1].upper()
         ticker_period = sys.argv[2].lower() if len(sys.argv) >= 3 else "1y"
@@ -49,10 +49,13 @@ def fetch_price_csv(ticker_name=None, ticker_period=None, ticker_interval=None, 
     if verbose:
         print(hist_imp)
 
-    if ticker_interval == "1d":
-        hist_imp.to_csv("WIKI-%s-%s-yfinance.csv" % (ticker_name, ticker_period))
-    else:
-        hist_imp.to_csv("WIKI-%s-%s-%s-yfinance.csv" % (ticker_name, ticker_period, ticker_interval))
+    if save:
+        if ticker_interval == "1d":
+            hist_imp.to_csv("WIKI-%s-%s-yfinance.csv" % (ticker_name, ticker_period))
+        else:
+            hist_imp.to_csv("WIKI-%s-%s-%s-yfinance.csv" % (ticker_name, ticker_period, ticker_interval))
+
+    return hist_imp
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
