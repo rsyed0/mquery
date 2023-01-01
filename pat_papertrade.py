@@ -9,7 +9,7 @@ from pyalgotrade.barfeed.csvfeed import GenericBarFeed
 
 import matplotlib.pyplot as plt
 
-from math import isclose
+from math import isclose, exp
 
 from random import randint, random
 
@@ -50,11 +50,16 @@ smaPeriod = 15
 
 default_max_spend = 0.25
 
-HIDDEN_SIZE_1 = 10
-HIDDEN_SIZE_2 = 3
+nn_window_based = False
+nn_window_size = 16
+nn_window_input_norm = 25
 
-nn_window_based = True
-nn_window_size = 30
+nn_shape = (7, 5, 5, 1)
+nn_shape_window = (nn_window_size, 8, 4, 1)
+
+strike_pct = 0.05
+win_multiplier = 0
+loss_multiplier = 0
 
 class RLNeuralNetworkStrategy(strategy.BacktestingStrategy):
     def __init__(self, feed, instrument, weights=None, max_spend=default_max_spend, live=False, verbose=False, trade=True, parent_strat=None, total_cash=total_cash):
@@ -63,7 +68,7 @@ class RLNeuralNetworkStrategy(strategy.BacktestingStrategy):
         self.__instrument = instrument
 
         self.__onBars = [sma_onBars, rsi_onBars, smarsi_onBars, macd_onBars, cbasis_onBars, gfill_onBars, history_onBars] #, energy_onBars]
-        self.__nnShape = (nn_window_size, HIDDEN_SIZE_1, HIDDEN_SIZE_2, 1) if nn_window_based else (len(self.__onBars), HIDDEN_SIZE_1, HIDDEN_SIZE_2, 1)
+        self.__nnShape = nn_shape_window if nn_window_based else nn_shape
         self.__cbasis = 0
 
         self.__weights = [[[2*random()-1 for i in range(self.__nnShape[i-1])] for j in range(self.__nnShape[i])] for i in range(1,len(self.__nnShape))] if weights is None else weights
@@ -263,6 +268,32 @@ class RLNeuralNetworkStrategy(strategy.BacktestingStrategy):
     def get_n_shares(self):
         return self.getBroker().getShares(self.get_instrument())
 
+    def win_pct_at_strike_pct(self, strike_pct):
+        # Calculate the percent of times the strategy "won" (made money) when passing
+        # the given strike percentage (%age of its money in the stock)
+        c_prices, port_values, share_values = self.get_cprices(), self.get_port_values(), self.get_share_values()
+        above = False
+        last_below_port_value = None
+        wins, total = 0, 0
+
+        for c_price, port_value, share_value in zip(c_prices, port_values, share_values):
+            if above and share_value / port_value < strike_pct:
+                total += 1
+                wins += 1 if port_value > last_below_port_value else 0
+                last_below_port_value = None
+                above = False
+            elif not above and share_value / port_value > strike_pct:
+                last_below_port_value = port_value
+                above = True
+
+        return wins, total
+
+    def score(self):
+        wins, total = self.win_pct_at_strike_pct(strike_pct)
+        money = self.getBroker().getEquity()
+
+        return (wins * win_multiplier) + ((total-wins) * loss_multiplier) + money
+
     # IMPLEMENTATION OF STRATEGY
     def onBars(self, bars):
         n_shares = self.getBroker().getShares(self.get_instrument())
@@ -276,7 +307,7 @@ class RLNeuralNetworkStrategy(strategy.BacktestingStrategy):
         if nn_window_based:
             if len(self.__cprices) >= nn_window_size:
                 window = self.__cprices[-nn_window_size:] + [c_price]
-                node_vals = [(window[i+1]-window[i])/window[i] for i in range(nn_window_size)]
+                node_vals = [nn_window_input_norm * (window[i+1]-window[i]) / window[i] for i in range(nn_window_size)]
         else:
             onBars_result = [st_onBars(self, bars) for st_onBars in self.__onBars]
             node_vals = onBars_result
@@ -288,7 +319,8 @@ class RLNeuralNetworkStrategy(strategy.BacktestingStrategy):
                 node_vals = [sum([node_val*wt for node_val, wt in zip(node_vals, wts)]) for wts in layer_wts]
 
             # node_vals[0] is now the buy/sell indicator
-            wt_sum = node_vals[0]
+            # TODO see if sigmoid is worth
+            wt_sum = (2 / (1 + exp(node_vals[0]))) - 1
             delta_shares = int(total_cash*self.__maxSpend*wt_sum/c_price)
 
             if delta_shares > 0 and strat_cash < delta_shares*c_price:
@@ -745,18 +777,12 @@ def run_strategy_nn(stock=None, period=None, interval=None, pop_size=50, n_gener
         interval = sys.argv[3].lower() if len(sys.argv) >= 4 else ""
 
     feed = quandlfeed.Feed() if interval.lower() == "" else GenericBarFeed(Frequency.MINUTE)
-    try:
-        if len(interval) == 0:
-            feed.addBarsFromCSV(stock, "WIKI-%s-%s-yfinance.csv" % (stock.upper(), period.lower()))
-        else:
-            feed.addBarsFromCSV(stock, "WIKI-%s-%s-%s-yfinance.csv" % (stock.upper(), period.lower(), interval.lower()))
-    except:
-        if len(interval) == 0:
-            fetch_price_csv(stock.upper(), period.lower())
-            feed.addBarsFromCSV(stock, "WIKI-%s-%s-yfinance.csv" % (stock.upper(), period.lower()))
-        else:
-            fetch_price_csv(stock.upper(), period.lower(), interval.lower())
-            feed.addBarsFromCSV(stock, "WIKI-%s-%s-%s-yfinance.csv" % (stock.upper(), period.lower(), interval.lower()))
+    if len(interval) == 0:
+        fetch_price_csv(stock.upper(), period.lower())
+        feed.addBarsFromCSV(stock, "WIKI-%s-%s-yfinance.csv" % (stock.upper(), period.lower()))
+    else:
+        fetch_price_csv(stock.upper(), period.lower(), interval.lower())
+        feed.addBarsFromCSV(stock, "WIKI-%s-%s-%s-yfinance.csv" % (stock.upper(), period.lower(), interval.lower()))
 
     population = []
     for i in range(pop_size):
@@ -772,7 +798,7 @@ def run_strategy_nn(stock=None, period=None, interval=None, pop_size=50, n_gener
 
                 strat = population[p_i]
                 strat.run()
-                score = strat.getBroker().getEquity()
+                score = strat.score()
                 scores.append(score)
 
             scores = [(i,scores[i]) for i in range(pop_size)]
@@ -806,6 +832,7 @@ def run_strategy_nn(stock=None, period=None, interval=None, pop_size=50, n_gener
     final_port_value = myStrategy.getBroker().getEquity()
     if verbose:
         print("Final portfolio value: $%.2f" % final_port_value)
+        print("Wins vs total: %s" % (str(myStrategy.win_pct_at_strike_pct(strike_pct))))
 
     if verbose:
         print(best_model)
