@@ -42,31 +42,35 @@ smaPeriod = 15
 
 default_max_spend = 0.25
 
-# TODO change to centralized model
-class MultipleWeightedIndicatorStrategy(strategy.BacktestingStrategy):
+nn_window_based = False
+nn_window_size = 16
+nn_window_input_norm = 25
+
+nn_shape = (7, 5, 5, 1)
+nn_shape_window = (nn_window_size, 8, 4, 1)
+
+class MultipleRLNeuralNetworkStrategy(strategy.BacktestingStrategy):
     def __init__(self, feeds, ovr_feed, instruments, weights_2d, max_spend=default_max_spend, total_cash=total_cash, verbose=False):
-        super(MultipleWeightedIndicatorStrategy, self).__init__(ovr_feed, total_cash)
+        super(MultipleRLNeuralNetworkStrategy, self).__init__(ovr_feed, total_cash)
         
         # needed ?
-        #self.__strategies = {instrument: WeightedIndicatorStrategy(feed, instrument, weights, total_cash=total_cash, trade=False, parent_strat=self) for feed, instrument, weights in zip(feeds, instruments, weights_2d)}
-        #self.__cash = total_cash
         self.__modelWtValues = {}
         self.__feeds = feeds
 
         self.__instruments = instruments
-        self.__weights = {instrument: weights for instrument, weights in zip(instruments, weights_2d)}
         self.__onBars = [sma_onBars, rsi_onBars, smarsi_onBars, macd_onBars, cbasis_onBars, gfill_onBars, history_onBars]
         self.__cbasis = {instrument: 0 for instrument in instruments}
 
         self.__cprices = {instrument: [] for instrument in instruments}
         self.__nshares = {instrument: [] for instrument in instruments}
 
-        for weights in weights_2d:
-            assert isclose(sum(weights), 1)
-            if allow_negation:
-                assert len(weights) == len(self.__onBars)*2
-            else:
-                assert len(weights) == len(self.__onBars)
+        self.__nnShape = nn_shape_window if nn_window_based else nn_shape
+        if not weights_2d:
+            self.__weights = {}   
+            for instrument in instruments:
+                self.__weights[instrument] = [[[2*random()-1 for i in range(self.__nnShape[i-1])] for j in range(self.__nnShape[i])] for i in range(1,len(self.__nnShape))]
+        else:
+            self.__weights = weights_2d
 
         self.__sma = {instrument: ma.SMA(ovr_feed[instrument].getPriceDataSeries(), smaPeriod) for instrument in instruments}
         self.__rsi = {instrument: rsi.RSI(ovr_feed[instrument].getPriceDataSeries(), smaPeriod) for instrument in instruments}
@@ -81,12 +85,14 @@ class MultipleWeightedIndicatorStrategy(strategy.BacktestingStrategy):
 
         self.__verbose = verbose
 
-    # "override" for decentralized approach
-    """def run_strategy(self):
-        # TODO decide how to use ovr_feed
-        for stock, strat in self.__strategies.items():
-            print(stock)
-            strat.run()"""
+    def get_max_spend(self):
+        return self.__maxSpend
+
+    def get_instruments(self):
+        return self.__instruments
+
+    def get_weights(self):
+        return self.__weights
 
     def get_sma(self, instrument):
         return self.__sma[instrument]
@@ -134,36 +140,172 @@ class MultipleWeightedIndicatorStrategy(strategy.BacktestingStrategy):
 
     def get_port_values(self):
         return self.__portValues
-    
-    """def notify(self, instrument, time, model_wt_values):
-        if time in self.__modelWtValues:
-            self.__modelWtValues[time][instrument] = sum(model_wt_values)
 
-            if len(self.__modelWtValues[time]) == len(self.__strategies) and len(self.__portValues) == time:
-                buys = []
-                for stock, buy_sell in self.__modelWtValues[time].items():
-                    n_shares = self.__strategies[stock].get_n_shares()
+    def onBars(self, bars):
+        c_prices = {instrument: bar.getPrice() for instrument, bar in bars.items()}
 
-                    # sells then buys
-                    if buy_sell < 0:
-                        delta_shares = buy_sell * total_cash
-                        self.__cash += self.__strategies[stock].trade_shares(delta_shares)
-                    else:
-                        positives.append((stock,buy_sell))
+        buy_sell_rtgs = {}
+        for instrument in self.__instruments:
+            node_vals = None
 
-                # normalize all buy signals to total cash on hand * max_spend parameter
-                s = sum([x for _,x in buys])
-                positives = [(k,v/s) for k,v in buys]
-                spend_cash = self.__maxSpend * self.__cash
+            if nn_window_based:
+                if len(self.__cprices) >= nn_window_size:
+                    window = self.__cprices[-nn_window_size:] + [c_price]
+                    node_vals = [nn_window_input_norm * (window[i+1]-window[i]) / window[i] for i in range(nn_window_size)]
+            else:
+                onBars_result = [st_onBars(self, bars, instrument) for st_onBars in self.__onBars]
+                node_vals = onBars_result
 
-                for stock, norm_buy_sell in buys.items():
-                    self.__strategies[stock].trade_cash(spend_cash * norm_buy_sell)
+            if not (nn_window_based and len(self.__cprices) < nn_window_size):
+                # feed thru NN
+                for layer_i in range(len(self.__weights[instrument])):
+                    layer_wts = self.__weights[instrument][layer_i]
+                    node_vals = [sum([node_val*wt for node_val, wt in zip(node_vals, wts)]) for wts in layer_wts]
 
-                self.__shareValues.append(self.get_share_value())
-                self.__cashValues.append(self.get_cash_value())
-                self.__portValues.append(self.get_port_value())
-        else:
-            self.__modelWtValues[time] = {instrument: sum(model_wt_values)}"""
+                # node_vals[0] is now the buy/sell indicator
+                # TODO see if sigmoid is worth
+                wt_sum = (2 / (1 + exp(node_vals[0]))) - 1
+                buy_sell_rtgs[instrument] = wt_sum
+            else:
+                buy_sell_rtgs[instrument] = 0
+
+        # get total value of all shares
+        share_value = self.get_share_value()
+
+        buys = []
+        for instrument, buy_sell in buy_sell_rtgs.items():
+            n_shares = self.getBroker().getShares(instrument)
+            instrument_share_value = n_shares * c_prices[instrument]
+            exposure = instrument_share_value / share_value if not share_value == 0 else 0
+
+            # sells then buys
+            # TODO consider swapping order, sell orders should be processed pre-buy to add to cash on hand
+            if buy_sell < 0:
+                # TODO find a better metric (cash -> shares)
+                delta_shares = max(-n_shares, int(buy_sell * (exposure * total_cash) / c_prices[instrument]))
+
+                if not delta_shares == 0:
+                    if self.__verbose:
+                        print("Day %d: sold %d shares of %s at $%-7.2f" % (len(self.__cprices[instrument])+1, abs(delta_shares), instrument.upper(), c_prices[instrument]))
+                    self.marketOrder(instrument, delta_shares)
+                    self.__cbasis[instrument] = (n_shares*self.__cbasis[instrument] + delta_shares*c_prices[instrument]) / (n_shares + delta_shares) if not n_shares + delta_shares == 0 else 0
+
+            elif buy_sell > 0:
+                buys.append((instrument, buy_sell))
+
+        # normalize all buy signals to total cash on hand * max_spend parameter
+        s = sum([x for _,x in buys])
+        buys = [(k,v/s) for k,v in buys]
+        spend_cash = self.__maxSpend * self.get_cash_value()
+
+        #print(buys)
+        if spend_cash < 0:
+            print("FATAL ERROR: spend_cash < 0")
+            sys.exit(1)
+
+        for instrument, norm_buy_sell in buys:
+            #self.__strategies[stock].trade_cash(spend_cash * norm_buy_sell)
+            delta_shares = int(spend_cash * norm_buy_sell / c_prices[instrument])
+
+            if not delta_shares == 0:
+                if self.__verbose:
+                    print("Day %d: bought %d shares of %s at $%-7.2f" % (len(self.__cprices[instrument])+1, delta_shares, instrument.upper(), c_prices[instrument]))
+                self.marketOrder(instrument, delta_shares)
+                self.__cbasis[instrument] = (n_shares*self.__cbasis[instrument] + delta_shares*c_prices[instrument]) / (n_shares + delta_shares)
+
+        for instrument, c_price in c_prices.items():
+            self.__cprices[instrument].append(c_price)
+            self.__nshares[instrument].append(self.getBroker().getShares(instrument))
+
+        self.__shareValues.append(self.get_share_value())
+        self.__cashValues.append(self.get_cash_value())
+        self.__portValues.append(self.get_port_value())
+
+# TODO change to centralized model
+class MultipleWeightedIndicatorStrategy(strategy.BacktestingStrategy):
+    def __init__(self, feeds, ovr_feed, instruments, weights_2d, max_spend=default_max_spend, total_cash=total_cash, verbose=False):
+        super(MultipleWeightedIndicatorStrategy, self).__init__(ovr_feed, total_cash)
+        
+        # needed ?
+        #self.__strategies = {instrument: WeightedIndicatorStrategy(feed, instrument, weights, total_cash=total_cash, trade=False, parent_strat=self) for feed, instrument, weights in zip(feeds, instruments, weights_2d)}
+        #self.__cash = total_cash
+        self.__modelWtValues = {}
+        self.__feeds = feeds
+
+        self.__instruments = instruments
+        self.__weights = {instrument: weights for instrument, weights in zip(instruments, weights_2d)}
+        self.__onBars = [sma_onBars, rsi_onBars, smarsi_onBars, macd_onBars, cbasis_onBars, gfill_onBars, history_onBars]
+        self.__cbasis = {instrument: 0 for instrument in instruments}
+
+        self.__cprices = {instrument: [] for instrument in instruments}
+        self.__nshares = {instrument: [] for instrument in instruments}
+
+        for weights in weights_2d:
+            assert isclose(sum(weights), 1)
+            if allow_negation:
+                assert len(weights) == len(self.__onBars)*2
+            else:
+                assert len(weights) == len(self.__onBars)
+
+        self.__sma = {instrument: ma.SMA(ovr_feed[instrument].getPriceDataSeries(), smaPeriod) for instrument in instruments}
+        self.__rsi = {instrument: rsi.RSI(ovr_feed[instrument].getPriceDataSeries(), smaPeriod) for instrument in instruments}
+        self.__macd = {instrument: macd.MACD(ovr_feed[instrument].getPriceDataSeries(), fastEmaPeriod, slowEmaPeriod, signalEmaPeriod) for instrument in instruments}
+        self.__bb = {instrument: bollinger.BollingerBands(ovr_feed[instrument].getPriceDataSeries(), bBandsPeriod, 2) for instrument in instruments}
+
+        # TODO implement per-instrument max_spend
+        self.__maxSpend = max_spend
+
+        # TODO track share values/n_shares for each instrument
+        self.__shareValues, self.__cashValues, self.__portValues = [], [], []
+
+        self.__verbose = verbose
+
+    def get_sma(self, instrument):
+        return self.__sma[instrument]
+
+    def get_rsi(self, instrument):
+        return self.__rsi[instrument]
+
+    def get_macd(self, instrument):
+        return self.__macd[instrument]
+
+    def get_bb(self, instrument):
+        return self.__bb[instrument]
+
+    def get_cbasis(self, instrument):
+        return self.__cbasis[instrument]
+
+    def get_cprices(self, instrument):
+        return self.__cprices[instrument]
+
+    def get_nshares(self, instrument):
+        return self.__nshares[instrument]
+
+    def get_cash_value(self):
+        #share_value = self.get_share_value()
+        #port_value = self.get_port_value()
+        #return port_value - share_value
+
+        return self.getBroker().getCash()
+
+    def get_cash_values(self):
+        return self.__cashValues
+
+    def get_share_value(self):
+        for instrument in self.__instruments:
+            if len(self.__cprices[instrument]) == 0:
+                return -1
+
+        return sum([self.__cprices[instrument][-1]*self.getBroker().getShares(instrument) for instrument in self.__weights.keys()])
+
+    def get_share_values(self):
+        return self.__shareValues
+
+    def get_port_value(self):
+        return self.getBroker().getEquity()
+
+    def get_port_values(self):
+        return self.__portValues
 
     def onBars(self, bars):
         c_prices = {instrument: bar.getPrice() for instrument, bar in bars.items()}
@@ -267,7 +409,36 @@ def cross(model_a, model_b, n_children=2):
         out.append((mc, max_spend))
     return out
 
-def main():
+def cross_nn(model_a, model_b, n_children=2):
+    model_c_weights = {}
+    model_a_weights, model_b_weights = model_a[0], model_b[0]
+
+    max_spend = (msp_dominance*model_a[1])+((1-msp_dominance)*model_b[1])
+
+    for instrument in model_a_weights.keys():
+        model_a_inst_wts, model_b_inst_wts = model_a_weights[instrument], model_b_weights[instrument]
+        model_c_weights[instrument] = [[[(a+b)/2 for a,b in zip(model_a_inst_wts[j][i], model_b_inst_wts[j][i])] for i in range(len(model_a_inst_wts[j]))] for j in range(len(model_a_inst_wts))]
+
+    # TODO add mutations
+    out = []
+    for nc in range(n_children):
+        mc = deepcopy(model_c_weights)
+        for instrument in model_a_weights.keys():
+            model_a_inst_wts = model_a_weights[instrument]
+
+            for i in range(n_models):
+                if random() < p_mutation:
+                    i = int(random()*len(model_a_inst_wts))
+                    j = int(random()*len(model_a_inst_wts[i]))
+                    k = int(random()*len(model_a_inst_wts[i][j]))
+
+                    mc[instrument][i][j][k] += (2*random()-1)
+                    mc[instrument][i][j][k] = min(1, max(-1, mc[instrument][i][j][k]))
+        out.append((mc, max_spend))
+
+    return out
+
+def run_strategy():
     if len(sys.argv) < 2:
         sys.exit()
 
@@ -374,5 +545,112 @@ def main():
     plt.legend()
     plt.show()
 
+def run_strategy_nn():
+    if len(sys.argv) < 2:
+        sys.exit()
+
+    args = sys.argv[1:]
+    symbols = []
+    this_symbol = []
+    for arg in args:
+        if arg[0].isnumeric():
+            if len(this_symbol) == 1:
+                symbols.append((this_symbol[0], arg))
+                this_symbol = []
+            else:
+                print("invalid args")
+                sys.exit(1)
+        else:
+            if len(this_symbol) == 0:
+                this_symbol.append(arg.lower())
+            elif len(this_symbol) == 1:
+                symbols.append((this_symbol[0], '1y'))
+                this_symbol = [arg.lower()]
+
+    if len(this_symbol) == 1:
+        symbols.append((this_symbol[0], '1y'))
+    elif len(this_symbol) == 2:
+        symbols.append(this_symbol)
+
+    print(symbols)
+
+    # TODO debug issues when different periods are used
+    orig_feeds = []
+    orig_ovr_feed = quandlfeed.Feed()
+    for stock, period in symbols:
+        feed = quandlfeed.Feed()
+        feed.addBarsFromCSV(stock, "WIKI-%s-%s-yfinance.csv" % (stock.upper(), period.lower()))
+        orig_ovr_feed.addBarsFromCSV(stock, "WIKI-%s-%s-yfinance.csv" % (stock.upper(), period.lower()))
+        orig_feeds.append(feed)
+
+    instruments = [s.lower() for s,_ in symbols]
+    n_symbols = len(symbols)
+
+    nn_shape_eff = nn_shape_window if nn_window_based else nn_shape
+
+    population = []
+    for i in range(pop_size):
+        pop_member = {stock: [[[2*random()-1 for i in range(nn_shape_eff[i-1])] for j in range(nn_shape_eff[i])] for i in range(1,len(nn_shape_eff))] for stock in instruments}
+        population.append((pop_member,random()))
+
+    high_score, best_model = 0, None        
+
+    for i in range(n_generations):
+
+        scores = []
+        for j in range(pop_size):
+            feeds = deepcopy(orig_feeds)
+            ovr_feed = deepcopy(orig_ovr_feed)
+            this_strategy = MultipleRLNeuralNetworkStrategy(feeds, ovr_feed, instruments, population[j][0], max_spend=population[j][1])
+            this_strategy.run()
+
+            score = this_strategy.get_port_value()
+            scores.append((j, score))
+
+        scores.sort(key=lambda x:x[1], reverse=True)
+
+        print("Generation",i+1,":",scores)
+
+        scores = scores[:n_survivors]
+        if scores[0][1] > high_score:
+            best_model = population[scores[0][0]]
+            high_score = scores[0][1]
+
+        next_pop = [best_model] if keep_best_model else []
+        for i in range(len(scores)):
+            for j in range(i+1, len(scores)):
+                a,b = population[scores[i][0]], population[scores[j][0]]
+
+                #print(a,b)
+                #res = ([cross(ar, br, n_children=1) for ar,br in zip(a[0],b[0])], msp_dominance*a[1] + (1-msp_dominance)*b[1])
+                #next_pop.append(([normalize(x) for x in res[0]], res[1]))
+
+                res = cross_nn(a, b, n_children=1)
+                next_pop.extend(res)
+            if len(next_pop) >= pop_size:
+                population = next_pop[:pop_size]
+                break
+
+    feeds = deepcopy(orig_feeds)
+    ovr_feed = deepcopy(orig_ovr_feed)
+    best_strategy = MultipleRLNeuralNetworkStrategy(feeds, ovr_feed, instruments, best_model[0], max_spend=best_model[1], verbose=True)
+    best_strategy.run()
+
+    print(best_model)
+    print("Final portfolio value: $%-7.2f" % (best_strategy.get_port_value()))
+
+    t_axis = [i for i in range(len(best_strategy.get_port_values()))]
+
+    plt.title([x[0] for x in symbols]) #str([str(x)[:4] for x in best_model]))
+    plt.plot(t_axis, best_strategy.get_port_values(), label="Port Value")
+    plt.plot(t_axis, best_strategy.get_cash_values(), label="Cash Position")
+    plt.plot(t_axis, best_strategy.get_share_values(), label="Value in Shares")
+
+    for instrument in instruments:
+        plt.plot(t_axis, [n_shares*c_price for n_shares, c_price in zip(best_strategy.get_nshares(instrument), best_strategy.get_cprices(instrument))], label=instrument.upper()+" Port Value")
+
+    plt.legend()
+    plt.show()
+
 if __name__ == "__main__":
-    main()
+    run_strategy_nn()
